@@ -1,0 +1,1675 @@
+/***************************************************
+ * MODULE 3 — APPS SCRIPT (SECTION 1/7)
+ * Core Config + Menu + Email Capture + Utilities
+ * (Copy/paste this entire section first.)
+ ***************************************************/
+
+/*************** CONFIG (DEFAULTS) ***************/
+const CONFIG = {
+  moduleName: "Module 3",
+  brandLine: "BOW SPORTS CAPITAL · MODULE 3",
+
+  sheets: {
+    START: "START",
+    SIM: "SIM",
+    SHOCK: "SHOCK",
+    MODEL: "MODEL",
+    RESULTS: "RESULTS",
+    LOG: "SYSTEM_LOG",
+    ANSWER_KEY: "ANSWER_KEY",
+    MCQ_PRE: "MCQ_PRE",
+    MCQ_MID: "MCQ_MID",
+    MCQ_POST: "MCQ_POST"
+  },
+
+  // You confirmed email is in START!B20.
+  cells: {
+    studentEmail: "B20",
+
+    // State / locks (defaults; safe to change later if you want)
+    simState: "E34",     // we will write "SIM_COMPLETE"
+    shockState: "E40",   // we will write "SHOCK_COMPLETE"
+
+    // RESULTS defaults (from what we built)
+    resultsStatus: "A7",     // merged bar is fine; we write top-left
+    resultsFeedback: "A18",  // merged feedback box top-left
+    cardPre: "A5",
+    cardMid: "B5",
+    cardPost: "C5",
+    cardOverall: "D5"
+  },
+
+  // Tier thresholds (AVERAGE model; we’ll finalize exact rule in Section 6/7)
+  tiers: {
+  GOLD: 92,
+  SILVER: 78,
+  BRONZE: 65
+},
+
+
+  // Claim code pools (3 per tier) + NON-WORD suffix
+  claimPools: {
+    GOLD:   ["BOW-M3-GOLD",   "BOW-M3-ELITE",  "BOW-M3-PRIME"],
+    SILVER: ["BOW-M3-SILVER", "BOW-M3-CORE",   "BOW-M3-ADV"],
+    BRONZE: ["BOW-M3-BRONZE", "BOW-M3-FOUND",  "BOW-M3-BASIC"]
+  },
+
+  // Email subject templates
+  email: {
+    gradedPrefix: "BOW — MCQ Graded",
+    actionPrefix: "BOW — Simulation Update",
+    finalizePrefix: "BOW — Module 3 Results"
+  }
+};
+/*************** ATTEMPT POLICY (CAPS) ***************/
+const ATTEMPT_POLICY = {
+  maxSimLocks: 1,           // SIM can be locked once
+  maxShockResolves: 1,      // shock can be locked once
+  maxFinalize: 1,           // finalize once
+  maxMCQAttempts: 2         // per section (PRE/MID/POST)
+};
+
+function countAttempts_(email, actionName) {
+  const log = ensureLogSheet_();
+  const data = log.getDataRange().getValues();
+  let count = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][1] || "").trim();
+    const rowAction = String(data[i][2] || "").trim();
+    if (rowEmail === email && rowAction === actionName) count++;
+  }
+  return count;
+}
+
+function enforceAttemptCap_(email, actionName, maxAllowed, friendlyLabel) {
+  const used = countAttempts_(email, actionName);
+  if (used >= maxAllowed) {
+    uiAlert_(
+      "Attempt Limit Reached",
+      `${friendlyLabel} attempt limit reached (${used}/${maxAllowed}).`
+    );
+    return false;
+  }
+  return true;
+}
+
+/*************** ON OPEN MENU ***************/
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+
+  const menu = ui.createMenu("Module 3")
+    .addItem("Run SIM (Lock Pre-Shock)", "runSIM_M3")
+    .addSeparator()
+    .addItem("Run Shock (Pick Scenario)", "runShock_M3")
+    .addItem("Resolve Shock (Lock Post-Shock)", "resolveShock_M3")
+    .addSeparator()
+    .addItem("Grade PRE MCQ", "gradePRE_M3")
+    .addItem("Grade MID MCQ", "gradeMID_M3")
+    .addItem("Grade POST MCQ", "gradePOST_M3")
+    .addSeparator()
+    .addItem("Finalize Results + Email", "finalizeResults_M3")
+    .addSeparator()
+    .addItem("Explain Student Result", "explainStudentResult_M3")
+    .addItem("View Attempt Summary", "viewAttemptSummary_M3")
+    .addSeparator()
+    .addItem("Override Tier (Instructor)", "overrideTier_M3")
+    .addItem("Force Reset Student", "forceResetStudent_M3");
+
+  menu.addToUi();
+}
+
+
+/*************** BASIC SHEET GETTERS ***************/
+function getSheet_(name) {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(name);
+  if (!sh) throw new Error(`Missing sheet: "${name}"`);
+  return sh;
+}
+
+function getStartSheet_()  { return getSheet_(CONFIG.sheets.START); }
+function getSimSheet_()    { return getSheet_(CONFIG.sheets.SIM); }
+function getShockSheet_()  { return getSheet_(CONFIG.sheets.SHOCK); }
+function getModelSheet_()  { return getSheet_(CONFIG.sheets.MODEL); }
+function getResultsSheet_(){ return getSheet_(CONFIG.sheets.RESULTS); }
+function getKeySheet_()    { return getSheet_(CONFIG.sheets.ANSWER_KEY); }
+
+/*************** EMAIL CAPTURE (PROMPT IF MISSING) ***************/
+function getStudentEmail_() {
+  const start = getStartSheet_();
+  const cell = CONFIG.cells.studentEmail;
+
+  let email = String(start.getRange(cell).getValue()).trim();
+  if (email && email.includes("@")) return email;
+
+  const ui = SpreadsheetApp.getUi();
+  const resp = ui.prompt(
+    "Enter Your Email",
+    "Please enter the email address where your Module 3 updates will be sent:",
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (resp.getSelectedButton() !== ui.Button.OK) {
+    throw new Error("Email entry cancelled.");
+  }
+
+  email = String(resp.getResponseText()).trim();
+  if (!email || !email.includes("@")) {
+    ui.alert("Invalid Email", "Please run again and enter a valid email address.", ui.ButtonSet.OK);
+    throw new Error("Invalid email entered.");
+  }
+
+  start.getRange(cell).setValue(email);
+  return email;
+}
+
+/*************** NON-WORD SUFFIX GENERATOR ***************/
+/**
+ * Generates a suffix that is extremely unlikely to be a real word:
+ * - uppercase consonants + digits only (no vowels).
+ * Example: "K7Q3N"
+ */
+function randomNonWordSuffix_(len) {
+  const chars = "BCDFGHJKLMNPQRSTVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < (len || 5); i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return out;
+}
+
+/*************** CLAIM CODE GENERATOR (3 PER TIER + SUFFIX) ***************/
+function generateClaimCode_(tier) {
+  const t = String(tier || "").toUpperCase().trim();
+  const pool = CONFIG.claimPools[t];
+  if (!pool || pool.length === 0) throw new Error(`No claim code pool for tier: ${tier}`);
+
+  const base = pool[Math.floor(Math.random() * pool.length)];
+  return base;
+}
+
+
+/*************** EMAIL SENDER (BOW DARK THEME) ***************/
+function sendEmailHtml_(to, subject, title, subtitle, bodyHtml, accentText) {
+  const html = `
+  <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial;
+              background:#0b0f1a;padding:40px;color:#ffffff;">
+    <div style="max-width:680px;margin:auto;background:#111827;border-radius:18px;
+                padding:36px;box-shadow:0 25px 50px rgba(0,0,0,0.45);">
+      <div style="font-size:12px;letter-spacing:0.14em;color:#9ca3af;margin-bottom:14px;">
+        ${CONFIG.brandLine}
+      </div>
+      <h1 style="font-size:30px;font-weight:800;margin:0 0 10px 0;color:#ffffff;">
+        ${escapeHtml_(title)}
+      </h1>
+      <div style="font-size:16px;color:#93c5fd;margin-bottom:22px;">
+        ${escapeHtml_(subtitle || "")}
+      </div>
+
+      ${accentText ? `
+      <div style="margin:18px 0 26px 0;padding:16px;background:#020617;border-radius:12px;text-align:center;">
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:6px;">HIGHLIGHT</div>
+        <div style="font-size:20px;font-weight:900;letter-spacing:0.04em;color:#fbbf24;">
+          ${escapeHtml_(accentText)}
+        </div>
+      </div>` : ""}
+
+      <div style="font-size:15.5px;line-height:1.65;color:#e5e7eb;">
+        ${bodyHtml || ""}
+      </div>
+
+      <div style="margin-top:30px;padding-top:18px;border-top:1px solid #1f2937;
+                  font-size:12.5px;color:#9ca3af;">
+        This update was generated automatically by the BOW Module 3 Engine.
+      </div>
+    </div>
+  </div>`;
+
+  MailApp.sendEmail({ to, subject, htmlBody: html });
+}
+
+function escapeHtml_(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+/*************** STANDARDIZED ACTION EMAILS ***************/
+function sendActionEmail_(to, actionTitle, summaryLines, accentText) {
+  const subject = `${CONFIG.email.actionPrefix} — ${actionTitle}`;
+  const body = `
+    <p>${escapeHtml_(actionTitle)} was completed.</p>
+    ${summaryLines && summaryLines.length ? `
+      <div style="margin:18px 0;padding:16px;background:#020617;border-radius:12px;">
+        <ul style="margin:0;padding-left:18px;">
+          ${summaryLines.map(x => `<li>${escapeHtml_(x)}</li>`).join("")}
+        </ul>
+      </div>` : ""
+    }
+    <p>Next step: follow the workflow in the sheet menu to continue.</p>
+  `;
+  sendEmailHtml_(to, subject, actionTitle, "Simulation workflow update", body, accentText || "");
+}
+
+function sendGradedEmail_(to, sectionName, scoredText, conceptTopLine) {
+  const subject = `${CONFIG.email.gradedPrefix} — ${sectionName}`;
+  const body = `
+    <p>Your ${escapeHtml_(sectionName)} section has been graded.</p>
+    <div style="margin:18px 0;padding:16px;background:#020617;border-radius:12px;">
+      <div style="font-weight:700;margin-bottom:8px;">Score</div>
+      <div>${escapeHtml_(scoredText)}</div>
+      ${conceptTopLine ? `<div style="margin-top:10px;color:#cbd5e1;">${escapeHtml_(conceptTopLine)}</div>` : ""}
+    </div>
+    <p>Check the <strong>RESULTS</strong> tab for concept mastery and what to review next.</p>
+  `;
+  sendEmailHtml_(to, subject, `${sectionName} Graded`, "MCQ scoring update", body, scoredText);
+}
+
+/*************** LOG SHEET (AUTHORITATIVE) ***************/
+function ensureLogSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let log = ss.getSheetByName(CONFIG.sheets.LOG);
+  if (!log) {
+    log = ss.insertSheet(CONFIG.sheets.LOG);
+    log.appendRow(["Timestamp", "Email", "Action", "Correct", "Total", "Percent", "NotesJSON"]);
+  } else {
+    const head = log.getRange(1, 1, 1, 7).getValues()[0].map(String);
+    const expected = ["Timestamp","Email","Action","Correct","Total","Percent","NotesJSON"];
+    const ok = expected.every((v,i)=> head[i] === v);
+    if (!ok) {
+      // Force-correct header to keep downstream logic stable
+      log.getRange(1,1,1,7).setValues([expected]);
+    }
+  }
+  return log;
+}
+
+function logEvent_(email, action, correct, total, percent, notesObj) {
+  const log = ensureLogSheet_();
+  log.appendRow([
+    new Date(),
+    email || "",
+    action || "",
+    (correct === undefined || correct === null) ? "" : correct,
+    (total === undefined || total === null) ? "" : total,
+    (percent === undefined || percent === null) ? "" : percent,
+    notesObj ? JSON.stringify(notesObj) : ""
+  ]);
+}
+
+/*************** SIMPLE HELPERS ***************/
+function uiAlert_(title, msg) {
+  SpreadsheetApp.getUi().alert(title, msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function norm_(s) {
+  return String(s || "").trim();
+}
+
+function clamp_(n, lo, hi) {
+  const x = Number(n);
+  if (isNaN(x)) return lo;
+  return Math.max(lo, Math.min(hi, x));
+}
+/***************************************************
+ * MODULE 3 — APPS SCRIPT (SECTION 2/7)
+ * SIM + SHOCK Workflow (Run SIM / Run Shock / Resolve Shock)
+ * (Copy/paste directly UNDER Section 1.)
+ ***************************************************/
+
+/*************** SIM + SHOCK CELL CONTRACT (DEFAULTS) ***************/
+// SIM inputs
+const SIM_CELLS = {
+  focusChecks: "D8:D12",     // TRUE/FALSE
+  focusKeys: "B8:B12",       // QUALITY/GROWTH/etc
+  focusNames: "A8:A12",      // display names
+  allocation: "B16",         // "50 / 50" etc
+  focus1Key: "B19",
+  focus2Key: "B20",
+  weight1: "E19",
+  weight2: "E20",
+  penalty: "G20",
+  // SIM outputs (pre-shock)
+  orders: "E25",
+  partners: "E26",
+  platform: "E27",
+  market: "E28",
+  systemHealth: "E29",
+  allocPct1: "C18",   // % for Focus #1 (e.g., 50)
+  allocPct2: "C19"    // % for Focus #2 (e.g., 50)
+};
+
+
+// SHOCK inputs/outputs (from the file we built)
+// SHOCK inputs/outputs (matches your sheet layout)
+const SHOCK_CELLS = {
+  scenario: "B7",
+
+  // Response UI (merged)
+  responseCellTopLeft: "A14",
+  responseRange: "A14:E15",
+
+  // Helper list for dropdown (you can hide col H)
+  optionListRange: "H14:H20",
+
+  // Table locations
+  preOrders: "B20",
+  prePartners: "B21",
+  prePlatform: "B22",
+  preMarket: "B23",
+
+  scenOrders: "C20",
+  scenPartners: "C21",
+  scenPlatform: "C22",
+  scenMarket: "C23",
+
+  respOrders: "D20",
+  respPartners: "D21",
+  respPlatform: "D22",
+  respMarket: "D23",
+
+  postOrders: "E20",
+  postPartners: "E21",
+  postPlatform: "E22",
+  postMarket: "E23",
+  postSystemHealth: "E25",
+
+  status: "A28",
+  reason: "A30",
+  emailSummary: "A35",
+
+  // Optional display cell if you want a description somewhere
+  descCell: "A9"
+};
+/*************** SHOCK SCENARIO LIBRARY (FIXED OPTIONS) ***************/
+const SHOCK_LIBRARY = {
+  COST_SPIKE: {
+    desc: "A key input cost spikes unexpectedly, squeezing your margins.",
+    scenarioEffects: { orders: -6, partners: -4, platform: -10, market: -2 },
+    responses: [
+      { label: "Raise prices immediately to protect margin", effects: { orders: -6, partners: 0,  platform: 0,  market: +2 } },
+      { label: "Cut non-essential spend to keep runway",      effects: { orders: -2, partners: +2, platform: +4, market: 0 } },
+      { label: "Negotiate supplier contract (takes time)",    effects: { orders: -1, partners: +4, platform: +1, market: +1 } }
+    ]
+  },
+
+  PARTNER_EXIT: {
+    desc: "A major partner threatens to leave unless you change terms.",
+    scenarioEffects: { orders: -4, partners: -12, platform: -3, market: -4 },
+    responses: [
+      { label: "Offer better revenue share to keep them",     effects: { orders: +2, partners: +8, platform: 0,  market: -1 } },
+      { label: "Replace partner with smaller alternatives",   effects: { orders: -1, partners: +4, platform: +1, market: +2 } },
+      { label: "Build direct-to-customer channel yourself",   effects: { orders: 0,  partners: -2, platform: +4, market: +4 } }
+    ]
+  },
+
+  PLATFORM_OUTAGE: {
+    desc: "A platform outage hurts trust and interrupts orders.",
+    scenarioEffects: { orders: -10, partners: -6, platform: -12, market: -4 },
+    responses: [
+      { label: "Pause growth and harden reliability",         effects: { orders: -2, partners: +2, platform: +10, market: 0 } },
+      { label: "Issue credits + transparent communication",   effects: { orders: +1, partners: +4, platform: +4,  market: 0 } },
+      { label: "Ship fast hotfixes (risk bugs)",               effects: { orders: +3, partners: -1, platform: +2,  market: +2 } }
+    ]
+  }
+};
+
+function setResponseDropdown_(shock, options) {
+  // Write options into helper range
+  const listRange = shock.getRange(SHOCK_CELLS.optionListRange);
+  listRange.clearContent();
+
+  const rows = listRange.getNumRows();
+  const values = [];
+  for (let i = 0; i < rows; i++) values.push([options[i] || ""]);
+  listRange.setValues(values);
+
+  // Apply validation to the merged response range
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(listRange, true)
+    .setAllowInvalid(false)
+    .build();
+
+  shock.getRange(SHOCK_CELLS.responseRange).setDataValidation(rule);
+}
+
+
+
+/*************** FORMULA / OUTPUT VALIDATION ***************/
+function requireNonEmpty_(sheet, a1, label) {
+  const v = sheet.getRange(a1).getDisplayValue();
+  if (!String(v || "").trim()) {
+    throw new Error(`Missing value in ${sheet.getName()}!${a1} (${label}). A required formula/value appears to be missing.`);
+  }
+}
+
+function requireNumber_(sheet, a1, label) {
+  const raw = sheet.getRange(a1).getValue();
+  const n = Number(raw);
+  if (raw === "" || raw === null || isNaN(n)) {
+    throw new Error(`Expected a number in ${sheet.getName()}!${a1} (${label}). A required formula/value appears to be missing.`);
+  }
+  return n;
+}
+
+/*************** READ SIM STATE ***************/
+function isSimComplete_() {
+  const sim = getSimSheet_();
+  return String(sim.getRange(CONFIG.cells.simState).getValue()).trim() === "SIM_COMPLETE";
+}
+
+function setSimComplete_() {
+  const sim = getSimSheet_();
+  sim.getRange(CONFIG.cells.simState).setValue("SIM_COMPLETE");
+}
+
+function isShockComplete_() {
+  const shock = getShockSheet_();
+  return String(shock.getRange(CONFIG.cells.shockState).getValue()).trim() === "SHOCK_COMPLETE";
+}
+
+function setShockComplete_() {
+  const shock = getShockSheet_();
+  shock.getRange(CONFIG.cells.shockState).setValue("SHOCK_COMPLETE");
+}
+
+/*************** SIM: VALIDATE FOCUS CHOICES ***************/
+function getSelectedFocuses_() {
+  const sim = getSimSheet_();
+  const checks = sim.getRange(SIM_CELLS.focusChecks).getValues().flat().map(Boolean);
+  const keys = sim.getRange(SIM_CELLS.focusKeys).getValues().flat().map(String);
+  const names = sim.getRange(SIM_CELLS.focusNames).getValues().flat().map(String);
+
+  const selected = [];
+  for (let i = 0; i < checks.length; i++) {
+    if (checks[i]) selected.push({ key: keys[i], name: names[i] });
+  }
+  return selected;
+}
+
+/*************** SIM: RUN + LOCK (PRE-SHOCK) ***************/
+function _runSIM_M3_core() {
+  const ui = SpreadsheetApp.getUi();
+  const email = getStudentEmail_(); // prompt if missing
+  const sim = getSimSheet_();
+if (!enforceAttemptCap_(email, "SIM_LOCK", ATTEMPT_POLICY.maxSimLocks, "SIM")) return;
+
+
+  if (isSimComplete_()) {
+    uiAlert_("SIM Locked", "The SIM has already been locked. If you need a retry, your instructor must reset the SIM state cell.");
+    return;
+  }
+ /*************** COMPUTE PRE-SHOCK SYSTEM SCORES ***************/
+
+// ---- 1. Read selected focuses ----
+const selected = getSelectedFocuses_();
+const count = selected.length;
+
+if (count === 0) {
+  uiAlert_("Focus Required", "Please select at least one focus before running the SIM.");
+  return;
+}
+if (count > 2) {
+  uiAlert_("Too Many Focuses", "You may select at most two focus areas.");
+  return;
+}
+
+// ---- 2. Determine allocation weights (from C18/C19) ----
+let w1 = 1, w2 = 0;
+let alloc = "—";
+
+if (count === 2) {
+  const pct1Raw = sim.getRange(SIM_CELLS.allocPct1).getValue();
+  const pct2Raw = sim.getRange(SIM_CELLS.allocPct2).getValue();
+
+  const pct1 = Number(pct1Raw);
+  const pct2 = Number(pct2Raw);
+
+  if (isNaN(pct1) || isNaN(pct2)) {
+    uiAlert_("Allocation Required", "Enter numeric allocation percentages in C18 and C19 (e.g., 50 and 50).");
+    return;
+  }
+
+  if (pct1 < 0 || pct2 < 0) {
+    uiAlert_("Invalid Allocation", "Allocation percentages cannot be negative.");
+    return;
+  }
+
+  const sum = pct1 + pct2;
+  if (sum !== 100) {
+    uiAlert_("Invalid Allocation", "Allocation must add to 100 (e.g., 50 + 50, 70 + 30, 30 + 70).");
+    return;
+  }
+
+  w1 = pct1 / 100;
+  w2 = pct2 / 100;
+  alloc = `${pct1} / ${pct2}`;
+}
+
+// ---- 3. Map focus → base effects ----
+// Stronger positives, softer negatives so scores can reach 80–95 with good choices
+const BASE_EFFECTS = {
+  // Big gain in Demand + Partner, but you pay in Cost + Innovation (process focus slows innovation)
+  QUALITY:    { demand: 18, cost: -10, partner: 12, innovation: -8 },
+
+  // Big Demand + Innovation, but you pay in Cost + Partner stability (scaling stress)
+  GROWTH:     { demand: 24, cost: -14, partner: -10, innovation: 14 },
+
+  // Big Cost efficiency + Partner reliability, but you pay in Demand + Innovation (less excitement)
+  COST:       { demand: -12, cost: 26, partner: 10, innovation: -10 },
+
+  // Big Partner stability + Cost control, but you pay in Demand + Innovation (slower product)
+  PARTNERS:   { demand: -8, cost: 12, partner: 26, innovation: -10 },
+
+  // Big Innovation + Demand, but you pay in Cost + Partner stability (experimental risk)
+  INNOVATION: { demand: 14, cost: -16, partner: -12, innovation: 26 }
+};
+
+
+function effectFor(focusKey, weight) {
+  const e = BASE_EFFECTS[focusKey] || {};
+  return {
+    demand: (e.demand || 0) * weight,
+    cost: (e.cost || 0) * weight,
+    partner: (e.partner || 0) * weight,
+    innovation: (e.innovation || 0) * weight
+  };
+}
+function softCap_(x) {
+  // Diminishing returns after 85
+  if (x <= 85) return x;
+  return 85 + (x - 85) * 0.35; // only 35% of gains above 85 count
+}
+
+
+// ---- 4. Aggregate effects ----
+// More generous baseline so "good decisions" can actually land 70–90+
+let agg = { demand: 70, cost: 70, partner: 70, innovation: 70 };
+
+
+
+
+const f1 = selected[0];
+const e1 = effectFor(f1.key, w1);
+Object.keys(agg).forEach(k => agg[k] += e1[k]);
+
+if (count === 2) {
+  const f2 = selected[1];
+  const e2 = effectFor(f2.key, w2);
+  Object.keys(agg).forEach(k => agg[k] += e2[k]);
+}
+
+// ---- 5. Clamp to 0–100 ----
+const customerDemand     = clamp_(Math.round(softCap_(agg.demand)), 0, 100);
+const costEfficiency     = clamp_(Math.round(softCap_(agg.cost)), 0, 100);
+const partnerStability   = clamp_(Math.round(softCap_(agg.partner)), 0, 100);
+const innovationMomentum = clamp_(Math.round(softCap_(agg.innovation)), 0, 100);
+
+
+// ---- 6. System health ----
+const systemHealth = Math.round(
+  (customerDemand + costEfficiency + partnerStability + innovationMomentum) / 4
+);
+// Aliases for downstream email/log code (keeps naming consistent)
+const orders   = customerDemand;
+const partners = costEfficiency;
+const platform = partnerStability;
+const market   = innovationMomentum;
+const health   = systemHealth;
+
+// ---- 7. WRITE VALUES (THIS FIXES THE ERROR) ----
+sim.getRange(SIM_CELLS.orders).setValue(customerDemand);
+sim.getRange(SIM_CELLS.partners).setValue(costEfficiency);
+sim.getRange(SIM_CELLS.platform).setValue(partnerStability);
+sim.getRange(SIM_CELLS.market).setValue(innovationMomentum);
+sim.getRange(SIM_CELLS.systemHealth).setValue(systemHealth);
+
+  // Lock SIM (state machine)
+  setSimComplete_();
+lockSimInputs_();
+
+  // Email explanation (decision-maker tone)
+  const focusLine = selected.map(x => x.name).join(" + ");
+  const summary = [
+    `Focus chosen: ${focusLine}`,
+    `Allocation: ${alloc || "—"}`,
+    `Pre-Shock Scores — Orders ${orders}, Partners ${partners}, Platform ${platform}, Market ${market}`,
+    `System Health (avg): ${health}`
+  ];
+
+  sendActionEmail_(
+    email,
+    "SIM Locked (Pre-Shock)",
+    summary,
+    `System Health: ${health}`
+  );
+
+  ui.alert(
+    "SIM Locked",
+    "Your pre-shock system has been locked. Next: Run the Shock.",
+    ui.ButtonSet.OK
+  );
+
+  logEvent_(email, "SIM_LOCK", "", "", "", {
+    focuses: selected.map(x => x.key),
+    allocation: alloc,
+    pre: { orders, partners, platform, market, health }
+  });
+}
+
+/*************** SHOCK: PICK SCENARIO (OPTIONAL AUTO) ***************/
+function _runShock_M3_core() {
+  const ui = SpreadsheetApp.getUi();
+  const email = getStudentEmail_();
+  const sim = getSimSheet_();
+  const shock = getShockSheet_();
+
+  if (!isSimComplete_()) {
+    uiAlert_("Run SIM First", "Please run and lock the SIM before starting the shock.");
+    return;
+  }
+  if (isShockComplete_()) {
+    uiAlert_("Shock Locked", "The shock has already been resolved and locked.");
+    return;
+  }
+
+  // 1) Determine scenario (use selected if present; otherwise random)
+  let scenario = String(shock.getRange(SHOCK_CELLS.scenario).getValue()).trim();
+  if (!scenario) {
+    const keys = Object.keys(SHOCK_LIBRARY);
+    scenario = keys[Math.floor(Math.random() * keys.length)];
+    shock.getRange(SHOCK_CELLS.scenario).setValue(scenario);
+  }
+
+  if (!SHOCK_LIBRARY[scenario]) {
+    uiAlert_("Invalid Scenario", `Scenario "${scenario}" is not in the script library.`);
+    return;
+  }
+
+  const lib = SHOCK_LIBRARY[scenario];
+
+  // 2) Copy pre-shock values from SIM into SHOCK table (B20:B23)
+  const preOrders   = Number(sim.getRange(SIM_CELLS.orders).getValue());
+  const prePartners = Number(sim.getRange(SIM_CELLS.partners).getValue());
+  const prePlatform = Number(sim.getRange(SIM_CELLS.platform).getValue());
+  const preMarket   = Number(sim.getRange(SIM_CELLS.market).getValue());
+
+  if ([preOrders, prePartners, prePlatform, preMarket].some(x => isNaN(x))) {
+    throw new Error("SIM pre-shock values are missing or not numeric. Re-run SIM first.");
+  }
+
+  shock.getRange(SHOCK_CELLS.preOrders).setValue(preOrders);
+  shock.getRange(SHOCK_CELLS.prePartners).setValue(prePartners);
+  shock.getRange(SHOCK_CELLS.prePlatform).setValue(prePlatform);
+  shock.getRange(SHOCK_CELLS.preMarket).setValue(preMarket);
+
+  // 3) Write scenario description + effects into column C
+shock.getRange(SHOCK_CELLS.descCell).setValue(`Scenario: ${scenario} — ${lib.desc}`);
+
+
+  shock.getRange(SHOCK_CELLS.scenOrders).setValue(lib.scenarioEffects.orders);
+  shock.getRange(SHOCK_CELLS.scenPartners).setValue(lib.scenarioEffects.partners);
+  shock.getRange(SHOCK_CELLS.scenPlatform).setValue(lib.scenarioEffects.platform);
+  shock.getRange(SHOCK_CELLS.scenMarket).setValue(lib.scenarioEffects.market);
+
+  // 4) Clear any previous response + response effects + post results
+  shock.getRange(SHOCK_CELLS.responseRange).clearContent();
+  shock.getRange(`${SHOCK_CELLS.respOrders}:${SHOCK_CELLS.respMarket}`).clearContent();
+  shock.getRange(`${SHOCK_CELLS.postOrders}:${SHOCK_CELLS.postSystemHealth}`).clearContent();
+  shock.getRange(SHOCK_CELLS.status).clearContent();
+  shock.getRange(SHOCK_CELLS.reason).clearContent();
+  shock.getRange(SHOCK_CELLS.emailSummary).clearContent();
+
+  // 5) Build dropdown options for THIS scenario
+  const options = lib.responses.map(r => r.label);
+  setResponseDropdown_(shock, options);
+
+  sendActionEmail_(
+    email,
+    "Shock Started",
+    [
+      `Scenario: ${scenario}`,
+      `What happened: ${lib.desc}`,
+      "Next: choose ONE response in the response box, then click Resolve Shock."
+    ],
+    `Scenario: ${scenario}`
+  );
+
+  ui.alert(
+    "Shock Started",
+    `Scenario selected: ${scenario}\n\nChoose ONE response in ${SHOCK_CELLS.responseRange}, then click Resolve Shock.`,
+    ui.ButtonSet.OK
+  );
+
+  logEvent_(email, "SHOCK_START", "", "", "", { scenario });
+}
+
+
+/*************** SHOCK: RESOLVE + LOCK (POST-SHOCK) ***************/
+function _resolveShock_M3_core() {
+  const ui = SpreadsheetApp.getUi();
+  const email = getStudentEmail_();
+  const shock = getShockSheet_();
+
+  if (!isSimComplete_()) {
+    uiAlert_("Run SIM First", "Please run and lock the SIM before resolving the shock.");
+    return;
+  }
+  if (isShockComplete_()) {
+    uiAlert_("Shock Locked", "The shock has already been resolved and locked.");
+    return;
+  }
+
+  const scenario = String(shock.getRange(SHOCK_CELLS.scenario).getValue()).trim();
+  const chosen = String(shock.getRange(SHOCK_CELLS.responseCellTopLeft).getValue()).trim();
+
+  if (!scenario) {
+    uiAlert_("Choose a Scenario", "Please select a shock scenario in SHOCK!B7 (or click Run Shock).");
+    return;
+  }
+  if (!SHOCK_LIBRARY[scenario]) {
+    uiAlert_("Invalid Scenario", `Scenario "${scenario}" is not in the script library.`);
+    return;
+  }
+  if (!chosen) {
+    uiAlert_("Choose a Response", `Please choose ONE response in ${SHOCK_CELLS.responseRange} before resolving.`);
+    return;
+  }
+
+  const lib = SHOCK_LIBRARY[scenario];
+  const respObj = lib.responses.find(r => r.label === chosen);
+  if (!respObj) {
+    uiAlert_("Invalid Response", "Your selected response does not match the current scenario’s option list. Run Shock again.");
+    return;
+  }
+
+  // Read PRE (B) + Scenario effects (C)
+  const preOrders   = Number(shock.getRange(SHOCK_CELLS.preOrders).getValue());
+  const prePartners = Number(shock.getRange(SHOCK_CELLS.prePartners).getValue());
+  const prePlatform = Number(shock.getRange(SHOCK_CELLS.prePlatform).getValue());
+  const preMarket   = Number(shock.getRange(SHOCK_CELLS.preMarket).getValue());
+
+  const scenOrders   = Number(shock.getRange(SHOCK_CELLS.scenOrders).getValue());
+  const scenPartners = Number(shock.getRange(SHOCK_CELLS.scenPartners).getValue());
+  const scenPlatform = Number(shock.getRange(SHOCK_CELLS.scenPlatform).getValue());
+  const scenMarket   = Number(shock.getRange(SHOCK_CELLS.scenMarket).getValue());
+
+  // Write response effects (D)
+  shock.getRange(SHOCK_CELLS.respOrders).setValue(respObj.effects.orders);
+  shock.getRange(SHOCK_CELLS.respPartners).setValue(respObj.effects.partners);
+  shock.getRange(SHOCK_CELLS.respPlatform).setValue(respObj.effects.platform);
+  shock.getRange(SHOCK_CELLS.respMarket).setValue(respObj.effects.market);
+
+  // Compute post-shock (E)
+// Compute post-shock (E)
+// Make shocks less punishing and student response more important
+const SCEN_MULT = 0.65;   // scenario impact reduced
+const RESP_MULT = 1.20;   // response impact increased
+
+// IMPORTANT: define response effect variables (these were missing)
+const respOrders   = Number(respObj.effects.orders   || 0);
+const respPartners = Number(respObj.effects.partners || 0);
+const respPlatform = Number(respObj.effects.platform || 0);
+const respMarket   = Number(respObj.effects.market   || 0);
+
+const postOrders   = clamp_(Math.round(preOrders   + (scenOrders   * SCEN_MULT) + (respOrders   * RESP_MULT)), 0, 100);
+const postPartners = clamp_(Math.round(prePartners + (scenPartners * SCEN_MULT) + (respPartners * RESP_MULT)), 0, 100);
+const postPlatform = clamp_(Math.round(prePlatform + (scenPlatform * SCEN_MULT) + (respPlatform * RESP_MULT)), 0, 100);
+const postMarket   = clamp_(Math.round(preMarket   + (scenMarket   * SCEN_MULT) + (respMarket   * RESP_MULT)), 0, 100);
+
+// IMPORTANT: compute postHealth (this was missing too)
+const postHealth = Math.round((postOrders + postPartners + postPlatform + postMarket) / 4);
+
+
+  shock.getRange(SHOCK_CELLS.postOrders).setValue(postOrders);
+  shock.getRange(SHOCK_CELLS.postPartners).setValue(postPartners);
+  shock.getRange(SHOCK_CELLS.postPlatform).setValue(postPlatform);
+  shock.getRange(SHOCK_CELLS.postMarket).setValue(postMarket);
+  shock.getRange(SHOCK_CELLS.postSystemHealth).setValue(postHealth);
+
+  const statusText = "STATUS: SHOCK RESULTS LOCKED";
+  const reasonText = "Reason: Post-shock values calculated by script (Pre + Scenario + Response).";
+
+  shock.getRange(SHOCK_CELLS.status).setValue(statusText);
+  shock.getRange(SHOCK_CELLS.reason).setValue(reasonText);
+
+  shock.getRange(SHOCK_CELLS.emailSummary).setValue(
+    `Scenario: ${scenario}\nResponse: ${chosen}\n` +
+    `Post-Shock — Orders ${postOrders}, Partners ${postPartners}, Platform ${postPlatform}, Market ${postMarket}\n` +
+    `System Health: ${postHealth}`
+  );
+
+  setShockComplete_();
+
+  sendActionEmail_(
+    email,
+    "Shock Resolved (Post-Shock Locked)",
+    [
+      `Scenario: ${scenario}`,
+      `Response: ${chosen}`,
+      `Post-Shock Scores — Orders ${postOrders}, Partners ${postPartners}, Platform ${postPlatform}, Market ${postMarket}`,
+      `System Health (avg): ${postHealth}`
+    ],
+    `Post-Shock Health: ${postHealth}`
+  );
+
+  ui.alert(
+    "Shock Locked",
+    "Your post-shock results are locked. Next: grade MCQs and finalize results.",
+    ui.ButtonSet.OK
+  );
+
+  logEvent_(email, "SHOCK_RESOLVE", "", "", "", {
+    scenario,
+    response: chosen,
+    post: { orders: postOrders, partners: postPartners, platform: postPlatform, market: postMarket, health: postHealth }
+  });
+}
+/***************************************************
+ * MODULE 3 — APPS SCRIPT (SECTION 3/7)
+ * MCQ GRADING ENGINE (PRE / MID / POST)
+ * Robust, section-agnostic, concept-aware
+ * (Paste directly under Section 2.)
+ ***************************************************/
+
+/*************** MCQ CONFIG ***************/
+const MCQ_CONFIG = {
+  // Weights for overall (used later in finalize)
+  weights: {
+    PRE: 0.25,
+    MID: 0.30,
+    POST: 0.45
+  },
+
+  // Where to write scorecards in RESULTS
+  resultCards: {
+    PRE: CONFIG.cells.cardPre,
+    MID: CONFIG.cells.cardMid,
+    POST: CONFIG.cells.cardPost
+  }
+};
+
+/*************** PUBLIC ROUTERS ***************/
+function gradePRE_M3()  { gradeMCQSection_("PRE"); }
+function gradeMID_M3()  { gradeMCQSection_("MID"); }
+function gradePOST_M3() { gradeMCQSection_("POST"); }
+
+/*************** CORE GRADER ***************/
+function gradeMCQSection_(section) {
+  const email = getStudentEmail_();
+  const ss = SpreadsheetApp.getActive();
+if (!enforceAttemptCap_(email, `MCQ_${section}`, ATTEMPT_POLICY.maxMCQAttempts, `MCQ ${section}`)) return;
+
+  const mcqSheet = getSheet_(CONFIG.sheets[`MCQ_${section}`]);
+  const keySheet = getKeySheet_();
+  const results = getResultsSheet_();
+
+  // Guardrail: POST requires shock to be complete
+  if (section === "POST" && !isShockComplete_()) {
+    uiAlert_("Shock Required", "Please resolve and lock the shock before grading POST MCQs.");
+    return;
+  }
+
+  // Load answer key
+  const answerKey = loadAnswerKey_M3_(keySheet, section);
+
+  // Read student answers (template-based, not hardcoded rows)
+  const studentAnswers = readStudentAnswers_M3_(mcqSheet, answerKey.total);
+
+  // Grade
+  const graded = gradeAnswers_M3_(section, studentAnswers, answerKey);
+
+  // Write RESULTS card
+  writeMCQScoreToResults_(results, section, graded);
+
+  // Update concept mastery + overall snapshot
+  updateOverallAndConceptMastery_M3_();
+
+  // Log (authoritative)
+  logEvent_(email, `MCQ_${section}`, graded.correct, graded.total, graded.percent, graded.missesByConcept);
+
+  // Email student (immediate feedback)
+  const scoredText = `${graded.correct} / ${graded.total} (${graded.percent}%)`;
+  const topConcept = getTopMissedConcept_(graded.missesByConcept);
+
+  sendGradedEmail_(
+    email,
+    `MCQ ${section}`,
+    scoredText,
+    topConcept ? `Most missed concept: ${topConcept}` : ""
+  );
+
+  SpreadsheetApp.getUi().alert(
+    "MCQs Graded",
+    `MCQ ${section} scored ${graded.correct}/${graded.total} (${graded.percent}%).`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/*************** ANSWER KEY LOADER ***************/
+/**
+ * ANSWER_KEY format:
+ * Col A: SECTION  (PRE / MID / POST)
+ * Col B: QUESTION NUMBER
+ * Col C: CORRECT LETTER
+ * Col D: PRIMARY CONCEPT
+ * Col E: SECONDARY CONCEPT (optional)
+ */
+function loadAnswerKey_M3_(keySheet, section) {
+  const data = keySheet.getDataRange().getValues();
+  const keyByQ = {};
+  const conceptMap = {};
+  let total = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const [sec, qNum, corr, primary, secondary] = data[i];
+    if (String(sec).trim() !== section) continue;
+    if (!qNum || !corr) continue;
+
+    const q = Number(qNum);
+    keyByQ[q] = String(corr).trim().toUpperCase();
+    conceptMap[q] = {
+      primary: String(primary || "").trim(),
+      secondary: String(secondary || "").trim()
+    };
+    total = Math.max(total, q);
+  }
+
+  if (total === 0) {
+    throw new Error(`No answer key entries found for section ${section}.`);
+  }
+
+  return { keyByQ, conceptMap, total };
+}
+
+/*************** READ STUDENT ANSWERS ***************/
+/**
+ * Reads answers by scanning for rows where:
+ * Column B = "Your Answer:" (case-insensitive)
+ * Column C = dropdown letter
+ */
+function readStudentAnswers_M3_(mcqSheet, expectedCount) {
+  const lastRow = mcqSheet.getLastRow();
+  const colB = mcqSheet.getRange(1, 2, lastRow, 1).getValues(); // column B
+  const answers = [];
+
+  for (let r = 0; r < colB.length; r++) {
+    const v = String(colB[r][0]).trim().toLowerCase();
+    if (v === "your answer:" || v === "your answer") {
+      const letter = String(mcqSheet.getRange(r + 1, 3).getValue()).trim().toUpperCase();
+      answers.push(letter);
+    }
+  }
+
+  if (answers.length < expectedCount) {
+    throw new Error(
+      `Found only ${answers.length} answers in ${mcqSheet.getName()}, expected ${expectedCount}.`
+    );
+  }
+
+  return answers.slice(0, expectedCount);
+}
+
+/*************** GRADE ANSWERS ***************/
+function gradeAnswers_M3_(section, studentAnswers, answerKey) {
+  let correct = 0;
+  const missesByConcept = {};
+  const missedQuestions = [];
+
+  for (let q = 1; q <= answerKey.total; q++) {
+    const student = (studentAnswers[q - 1] || "").toUpperCase();
+    const key = (answerKey.keyByQ[q] || "").toUpperCase();
+
+    if (student && key && student === key) {
+      correct++;
+    } else {
+      const cmap = answerKey.conceptMap[q] || {};
+      const primary = cmap.primary || "Unmapped";
+      const secondary = cmap.secondary || "";
+
+      // Primary concept gets full weight
+      missesByConcept[primary] = (missesByConcept[primary] || 0) + 1;
+
+      // Secondary concept (if exists) gets half weight
+      if (secondary) {
+        missesByConcept[secondary] = (missesByConcept[secondary] || 0) + 0.5;
+      }
+
+      missedQuestions.push({ q, student: student || "—", key, primary, secondary });
+    }
+  }
+
+  const total = answerKey.total;
+  const percent = Math.round((correct / total) * 100);
+
+  return { correct, total, percent, missesByConcept, missedQuestions };
+}
+
+/*************** WRITE RESULTS CARD ***************/
+function writeMCQScoreToResults_(results, section, graded) {
+  const cell = MCQ_CONFIG.resultCards[section];
+  const text = `${graded.correct} / ${graded.total} (${graded.percent}%)`;
+  results.getRange(cell).setValue(text);
+}
+
+/*************** OVERALL + CONCEPT MASTERY ***************/
+function updateOverallAndConceptMastery_M3_() {
+  const ss = SpreadsheetApp.getActive();
+  const results = getResultsSheet_();
+  const log = ensureLogSheet_();
+  const data = log.getDataRange().getValues();
+
+  // Latest scores per section
+  const latest = {};
+  for (let i = data.length - 1; i >= 1; i--) {
+    const [ , , action, , total, percent ] = data[i];
+    if (action === "MCQ_PRE" && !latest.PRE) latest.PRE = percent;
+    if (action === "MCQ_MID" && !latest.MID) latest.MID = percent;
+    if (action === "MCQ_POST" && !latest.POST) latest.POST = percent;
+    if (latest.PRE && latest.MID && latest.POST) break;
+  }
+
+  // Weighted overall (ignore missing sections)
+  let sum = 0, wsum = 0;
+  if (latest.PRE !== undefined) {
+    sum += latest.PRE * MCQ_CONFIG.weights.PRE;
+    wsum += MCQ_CONFIG.weights.PRE;
+  }
+  if (latest.MID !== undefined) {
+    sum += latest.MID * MCQ_CONFIG.weights.MID;
+    wsum += MCQ_CONFIG.weights.MID;
+  }
+  if (latest.POST !== undefined) {
+    sum += latest.POST * MCQ_CONFIG.weights.POST;
+    wsum += MCQ_CONFIG.weights.POST;
+  }
+
+  const overall = wsum > 0 ? Math.round(sum / wsum) : "";
+  results.getRange(CONFIG.cells.cardOverall).setValue(overall ? `${overall}%` : "—");
+
+  // Aggregate concept misses across all MCQ attempts
+  const conceptMisses = {};
+  for (let i = 1; i < data.length; i++) {
+    const action = String(data[i][2]);
+    if (!action.startsWith("MCQ_")) continue;
+
+    const json = String(data[i][6] || "").trim();
+    if (!json) continue;
+
+    try {
+      const obj = JSON.parse(json);
+      Object.keys(obj).forEach(k => {
+        conceptMisses[k] = (conceptMisses[k] || 0) + Number(obj[k] || 0);
+      });
+    } catch (e) {}
+  }
+
+  // Write mastery (0–1 miss strong, 2+ review)
+  let row = 10;
+  while (true) {
+    const concept = String(results.getRange(`A${row}`).getValue()).trim();
+    if (!concept) break;
+
+    const misses = conceptMisses[concept] || 0;
+    const status = misses >= 2 ? "⚠ Review" : "✔ Strong";
+    results.getRange(`B${row}`).setValue(status);
+    row++;
+  }
+}
+
+/*************** UTIL ***************/
+function getTopMissedConcept_(missesByConcept) {
+  let max = 0, top = "";
+  Object.keys(missesByConcept || {}).forEach(k => {
+    if (missesByConcept[k] > max) {
+      max = missesByConcept[k];
+      top = k;
+    }
+  });
+  return top;
+}
+/***************************************************
+ * MODULE 3 — APPS SCRIPT (SECTION 4/7)
+ * FINALIZE RESULTS + TIERING + CLAIM CODE + EMAIL
+ * (Paste directly under Section 3.)
+ ***************************************************/
+
+/*************** FINALIZE RESULTS ***************/
+function _finalizeResults_M3_core() {
+  const ui = SpreadsheetApp.getUi();
+  const email = getStudentEmail_();
+if (!enforceAttemptCap_(email, "FINALIZE", ATTEMPT_POLICY.maxFinalize, "Finalize")) return;
+
+  const sim = getSimSheet_();
+  const shock = getShockSheet_();
+  const results = getResultsSheet_();
+  const model = getModelSheet_();
+
+  // ---------- GUARDRAILS ----------
+  if (!isSimComplete_()) {
+    uiAlert_("SIM Required", "Please run and lock the SIM before finalizing results.");
+    return;
+  }
+  if (!isShockComplete_()) {
+    uiAlert_("Shock Required", "Please resolve and lock the shock before finalizing results.");
+    return;
+  }
+
+  // MCQs must all be graded
+  const log = ensureLogSheet_();
+  const data = log.getDataRange().getValues();
+  const seen = { PRE:false, MID:false, POST:false };
+  for (let i = 1; i < data.length; i++) {
+    const action = String(data[i][2]);
+    if (action === "MCQ_PRE") seen.PRE = true;
+    if (action === "MCQ_MID") seen.MID = true;
+    if (action === "MCQ_POST") seen.POST = true;
+  }
+  if (!seen.PRE || !seen.MID || !seen.POST) {
+    uiAlert_("MCQs Not Complete", "Please grade PRE, MID, and POST MCQs before finalizing.");
+    return;
+  }
+
+  // ---------- READ MCQ OVERALL ----------
+  const overallText = String(results.getRange(CONFIG.cells.cardOverall).getDisplayValue());
+  const match = overallText.match(/(\d+)%/);
+  const mcqOverall = match ? Number(match[1]) : NaN;
+  if (isNaN(mcqOverall)) {
+    uiAlert_("MCQ Error", "Overall MCQ score could not be read.");
+    return;
+  }
+
+  // ---------- READ PRE-SHOCK SYSTEM ----------
+  const preOrders   = requireNumber_(sim, SIM_CELLS.orders, "Pre Orders");
+  const prePartners = requireNumber_(sim, SIM_CELLS.partners, "Pre Partners");
+  const prePlatform = requireNumber_(sim, SIM_CELLS.platform, "Pre Platform");
+  const preMarket   = requireNumber_(sim, SIM_CELLS.market, "Pre Market");
+  const preHealth   = requireNumber_(sim, SIM_CELLS.systemHealth, "Pre System Health");
+
+  // ---------- READ POST-SHOCK SYSTEM ----------
+  const postOrders   = requireNumber_(shock, SHOCK_CELLS.postOrders, "Post Orders");
+  const postPartners = requireNumber_(shock, SHOCK_CELLS.postPartners, "Post Partners");
+  const postPlatform = requireNumber_(shock, SHOCK_CELLS.postPlatform, "Post Platform");
+  const postMarket   = requireNumber_(shock, SHOCK_CELLS.postMarket, "Post Market");
+  const postHealth   = requireNumber_(shock, SHOCK_CELLS.postSystemHealth, "Post System Health");
+
+  // ---------- AVERAGE MODEL ----------
+  const avgScore = Math.round(
+    (mcqOverall + preHealth + postHealth) / 3
+  );
+
+  // ---------- DETERMINE TIER ----------
+  let tier = "BRONZE";
+  if (avgScore >= CONFIG.tiers.GOLD) tier = "GOLD";
+  else if (avgScore >= CONFIG.tiers.SILVER) tier = "SILVER";
+  else if (avgScore >= CONFIG.tiers.BRONZE) tier = "BRONZE";
+
+  // ---------- PASS / FAIL ----------
+  let pass = true;
+  let failReason = "";
+
+  if (avgScore < CONFIG.tiers.BRONZE) {
+    pass = false;
+    failReason = "Overall performance average fell below the passing threshold.";
+  }
+
+  if (pass && postHealth < 65) {
+    pass = false;
+    failReason = "Your system did not hold up under the market shock.";
+  }
+
+  // ---------- WRITE RESULTS ----------
+  if (!pass) {
+    results.getRange(CONFIG.cells.resultsStatus)
+      .setValue("STATUS: REVIEW REQUIRED");
+    results.getRange(CONFIG.cells.resultsFeedback)
+      .setValue(
+        `Final Result: REVIEW REQUIRED\n\n` +
+        `Reason: ${failReason}\n\n` +
+        `MCQ Overall: ${mcqOverall}%\n` +
+        `Pre-Shock Health: ${preHealth}\n` +
+        `Post-Shock Health: ${postHealth}`
+      );
+
+    sendFailFinalEmail_(
+      email,
+      mcqOverall,
+      preHealth,
+      postHealth,
+      failReason
+    );
+
+    ui.alert("Review Required", failReason, ui.ButtonSet.OK);
+    return;
+  }
+
+  // ---------- PASS FLOW ----------
+  const claimCode = generateClaimCode_(tier);
+
+  results.getRange(CONFIG.cells.resultsStatus)
+    .setValue(`STATUS: PASS — ${tier}`);
+
+  results.getRange(CONFIG.cells.resultsFeedback)
+    .setValue(
+      `Final Result: PASS (${tier})\n\n` +
+      `Average Score: ${avgScore}\n\n` +
+      `MCQ Overall: ${mcqOverall}%\n` +
+      `Pre-Shock Health: ${preHealth}\n` +
+      `Post-Shock Health: ${postHealth}\n\n` +
+      `Claim Code: ${claimCode}`
+    );
+
+  // ---------- EMAIL ----------
+  sendPassFinalEmail_(
+    email,
+    tier,
+    claimCode,
+    mcqOverall,
+    preHealth,
+    postHealth,
+    avgScore
+  );
+
+  logEvent_(email, "FINALIZE", "", "", avgScore, {
+    tier,
+    claimCode,
+    mcqOverall,
+    preHealth,
+    postHealth
+  });
+
+  ui.alert(
+    "Module Passed",
+    `Congratulations! You passed Module 3 (${tier}).`,
+    ui.ButtonSet.OK
+  );
+}
+
+/*************** FINAL EMAILS ***************/
+function sendPassFinalEmail_(to, tier, claimCode, mcq, pre, post, avg) {
+  const body = `
+    <p>You have successfully completed <strong>Module 3</strong>.</p>
+    <div style="margin:18px 0;padding:16px;background:#020617;border-radius:12px;">
+      <ul>
+        <li>MCQ Overall: ${mcq}%</li>
+        <li>Pre-Shock System Health: ${pre}</li>
+        <li>Post-Shock System Health: ${post}</li>
+        <li>Average Score: ${avg}</li>
+      </ul>
+    </div>
+    <p>Your official credential claim code:</p>
+  `;
+
+  sendEmailHtml_(
+    to,
+    `${CONFIG.email.finalizePrefix} — PASS (${tier})`,
+    "Module 3 Complete",
+    "Economic Decision-Making Evaluation",
+    body,
+    claimCode
+  );
+}
+
+function sendFailFinalEmail_(to, mcq, pre, post, reason) {
+  const body = `
+    <p>Your Module 3 attempt requires review.</p>
+    <div style="margin:18px 0;padding:16px;background:#020617;border-radius:12px;">
+      <strong>Reason:</strong> ${escapeHtml_(reason)}
+    </div>
+    <ul>
+      <li>MCQ Overall: ${mcq}%</li>
+      <li>Pre-Shock System Health: ${pre}</li>
+      <li>Post-Shock System Health: ${post}</li>
+    </ul>
+    <p>Review the RESULTS tab and try again if allowed.</p>
+  `;
+
+  sendEmailHtml_(
+    to,
+    `${CONFIG.email.finalizePrefix} — REVIEW REQUIRED`,
+    "Module 3 Review Required",
+    "Performance Summary",
+    body,
+    ""
+  );
+}
+/***************************************************
+ * MODULE 3 — APPS SCRIPT (SECTION 5/7)
+ * Formula Integrity + Reset / Retry Control
+ ***************************************************/
+
+/*************** REQUIRED FORMULA CONTRACT ***************/
+const FORMULA_CONTRACT = {
+ SIM: {
+  "E25": "Orders (pre-shock)",
+  "E26": "Partners (pre-shock)",
+  "E27": "Platform Health (pre-shock)",
+  "E28": "Market Position (pre-shock)",
+  "E29": "System Health (pre-shock)"
+},
+
+
+  SHOCK: {
+    "E20": "Orders (post-shock)",
+    "E21": "Partners (post-shock)",
+    "E22": "Platform Health (post-shock)",
+    "E23": "Market Position (post-shock)",
+    "E25": "System Health (post-shock)",
+    "A28": "Final Status",
+    "A30": "Fail / Pass Reason",
+    "A35": "Email Summary"
+  },
+  RESULTS: {
+    [CONFIG.cells.cardPre]: "MCQ PRE card",
+    [CONFIG.cells.cardMid]: "MCQ MID card",
+    [CONFIG.cells.cardPost]: "MCQ POST card",
+    [CONFIG.cells.cardOverall]: "Overall MCQ card",
+    [CONFIG.cells.resultsStatus]: "Final Status line",
+    [CONFIG.cells.resultsFeedback]: "Final Feedback box"
+  }
+};
+
+/*************** FORMULA VALIDATOR ***************/
+function validateAllFormulas_M3_() {
+  const ss = SpreadsheetApp.getActive();
+
+  // Always require these base sheets to exist
+  ["SIM", "SHOCK", "RESULTS"].forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh) throw new Error(`Missing sheet: ${name}`);
+  });
+
+  // Only require SIM outputs AFTER SIM is complete
+  if (isSimComplete_()) {
+    const sim = ss.getSheetByName("SIM");
+    Object.keys(FORMULA_CONTRACT.SIM).forEach(a1 => {
+      const val = sim.getRange(a1).getDisplayValue();
+      if (String(val || "").trim() === "") {
+        throw new Error(`Formula/value missing in SIM!${a1} (${FORMULA_CONTRACT.SIM[a1]}).`);
+      }
+    });
+  }
+
+  // Only require SHOCK outputs AFTER shock is complete
+  if (isShockComplete_()) {
+    const shock = ss.getSheetByName("SHOCK");
+    Object.keys(FORMULA_CONTRACT.SHOCK).forEach(a1 => {
+      const val = shock.getRange(a1).getDisplayValue();
+      if (String(val || "").trim() === "") {
+        throw new Error(`Formula/value missing in SHOCK!${a1} (${FORMULA_CONTRACT.SHOCK[a1]}).`);
+      }
+    });
+  }
+
+  // RESULTS: allow placeholders, but require the cells to at least exist (they will)
+  const results = ss.getSheetByName("RESULTS");
+  Object.keys(FORMULA_CONTRACT.RESULTS).forEach(a1 => {
+    results.getRange(a1); // throws if invalid A1; otherwise ok
+  });
+}
+
+/*************** SAFE WRAPPER ***************/
+function runWithValidation_(fn, label) {
+  try {
+    validateAllFormulas_M3_();
+    fn();
+    validateAllFormulas_M3_();
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(
+      "System Error",
+      `The system could not complete "${label}".\n\n` +
+      `Reason:\n${e.message}\n\n` +
+      `No data was finalized. Please notify your instructor.`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    throw e;
+  }
+}
+
+/*************** VALIDATED WRAPPERS (SAFE) ***************/
+// NOTE: these wrappers call the *_CORE functions below.
+// DO NOT rename these four wrapper function names.
+
+function runSIM_M3() {
+  runWithValidation_(_runSIM_M3_core, "Run SIM");
+}
+function runShock_M3() {
+  runWithValidation_(_runShock_M3_core, "Run Shock");
+}
+function resolveShock_M3() {
+  runWithValidation_(_resolveShock_M3_core, "Resolve Shock");
+}
+function finalizeResults_M3() {
+  runWithValidation_(_finalizeResults_M3_core, "Finalize Results");
+}
+
+
+/*************** STUDENT-SAFE RESET (LIMITED) ***************/
+function resetShock_M3() {
+  const shock = getShockSheet_();
+  shock.getRange(CONFIG.cells.shockState).clearContent();
+shock.getRange(SHOCK_CELLS.response).clearContent(); // response (A14)
+  SpreadsheetApp.getUi().alert(
+    "Shock Reset",
+    "Shock response cleared. You may choose again.",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/*************** INSTRUCTOR RESET (FULL) ***************/
+function instructorResetAll_M3() {
+  const ui = SpreadsheetApp.getUi();
+  const confirm = ui.alert(
+    "Instructor Reset",
+    "This will reset SIM, SHOCK, and RESULTS.\n\nProceed?",
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+getSimSheet_().getProtections(SpreadsheetApp.ProtectionType.RANGE)
+  .forEach(p => p.remove());
+
+  // Clear states
+  getSimSheet_().getRange(CONFIG.cells.simState).clearContent();
+  getShockSheet_().getRange(CONFIG.cells.shockState).clearContent();
+
+  // Clear RESULTS
+  const results = getResultsSheet_();
+  results.getRange(CONFIG.cells.resultsStatus).setValue("STATUS: —");
+  results.getRange(CONFIG.cells.resultsFeedback).setValue("");
+
+  // Clear cards
+  results.getRange(CONFIG.cells.cardPre).setValue("—");
+  results.getRange(CONFIG.cells.cardMid).setValue("—");
+  results.getRange(CONFIG.cells.cardPost).setValue("—");
+  results.getRange(CONFIG.cells.cardOverall).setValue("—");
+
+  ui.alert("Reset Complete", "System reset successfully.", ui.ButtonSet.OK);
+}
+/***************************************************
+ * MODULE 3 — APPS SCRIPT (SECTION 7/7)
+ * INSTRUCTOR TOOLS + DIAGNOSTICS + EXPLAINABILITY
+ ***************************************************/
+
+
+/*************** STUDENT LOOKUP ***************/
+function promptForStudentEmail_() {
+  const ui = SpreadsheetApp.getUi();
+  const res = ui.prompt(
+    "Student Email",
+    "Enter the student's email address:",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (res.getSelectedButton() !== ui.Button.OK) return null;
+  const email = String(res.getResponseText()).trim();
+  if (!email || !email.includes("@")) {
+    ui.alert("Invalid Email", "Please enter a valid email.", ui.ButtonSet.OK);
+    return null;
+  }
+  return email;
+}
+
+/*************** EXPLAIN RESULT ***************/
+function explainStudentResult_M3() {
+  const email = promptForStudentEmail_();
+  if (!email) return;
+
+  const log = ensureLogSheet_();
+  const data = log.getDataRange().getValues();
+
+  let latestFinalize = null;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][1]) === email && String(data[i][2]) === "FINALIZE") {
+      latestFinalize = data[i];
+      break;
+    }
+  }
+
+  if (!latestFinalize) {
+    SpreadsheetApp.getUi().alert(
+      "No Final Result",
+      "No finalized attempt found for this student.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  let details = {};
+  try {
+    details = JSON.parse(latestFinalize[6] || "{}");
+  } catch (e) {}
+
+  const message =
+    `STUDENT: ${email}\n\n` +
+    `FINAL TIER: ${details.tier || "—"}\n` +
+    `CLAIM CODE: ${details.claimCode || "—"}\n\n` +
+    `MCQ OVERALL: ${details.mcqOverall}%\n` +
+    `PRE-SHOCK HEALTH: ${details.preHealth}\n` +
+    `POST-SHOCK HEALTH: ${details.postHealth}\n\n` +
+    `WHY THIS RESULT:\n` +
+    `• Tier based on average of MCQs + system health\n` +
+    `• Tier normalized by weakest component\n` +
+    `• Claim code issued once and locked`;
+
+  SpreadsheetApp.getUi().alert(
+    "Explain Student Result",
+    message,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/*************** ATTEMPT SUMMARY ***************/
+function viewAttemptSummary_M3() {
+  const email = promptForStudentEmail_();
+  if (!email) return;
+
+  const log = ensureLogSheet_();
+  const data = log.getDataRange().getValues();
+
+  let mcq = { PRE:0, MID:0, POST:0 };
+  let sim = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][1]) !== email) continue;
+    const action = String(data[i][2]);
+    if (action === "MCQ_PRE") mcq.PRE++;
+    if (action === "MCQ_MID") mcq.MID++;
+    if (action === "MCQ_POST") mcq.POST++;
+    if (action === "SIM_LOCK") sim++;
+  }
+
+  const msg =
+    `ATTEMPT SUMMARY FOR ${email}\n\n` +
+    `MCQ PRE Attempts: ${mcq.PRE}\n` +
+    `MCQ MID Attempts: ${mcq.MID}\n` +
+    `MCQ POST Attempts: ${mcq.POST}\n\n` +
+    `SIM Attempts: ${sim}\n\n` +
+    `Limits:\n` +
+    `• MCQ max: ${ATTEMPT_POLICY.maxMCQAttempts}\n` +
+    `• SIM max: ${ATTEMPT_POLICY.maxSimLocks}`;
+
+
+  SpreadsheetApp.getUi().alert(
+    "Attempt Summary",
+    msg,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/*************** INSTRUCTOR TIER OVERRIDE ***************/
+function overrideTier_M3() {
+  const email = promptForStudentEmail_();
+  if (!email) return;
+
+  const ui = SpreadsheetApp.getUi();
+  const tierRes = ui.prompt(
+    "Override Tier",
+    "Enter tier to assign (GOLD / SILVER / BRONZE):",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (tierRes.getSelectedButton() !== ui.Button.OK) return;
+
+  const tier = String(tierRes.getResponseText()).toUpperCase().trim();
+  if (!["GOLD","SILVER","BRONZE"].includes(tier)) {
+    ui.alert("Invalid Tier", "Tier must be GOLD, SILVER, or BRONZE.", ui.ButtonSet.OK);
+    return;
+  }
+
+  const code = generateClaimCode_(tier);
+  logEvent_(email, "INSTRUCTOR_OVERRIDE", "", "", "", { tier, claimCode: code });
+
+  SpreadsheetApp.getUi().alert(
+    "Override Applied",
+    `Tier overridden to ${tier}.\nClaim Code: ${code}`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/*************** FORCE RESET STUDENT ***************/
+function forceResetStudent_M3() {
+  const email = promptForStudentEmail_();
+  if (!email) return;
+
+  const ui = SpreadsheetApp.getUi();
+  const confirm = ui.alert(
+    "Force Reset Student",
+    `This will clear ALL attempts for:\n${email}\n\nProceed?`,
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+
+  const log = ensureLogSheet_();
+  const data = log.getDataRange().getValues();
+  const kept = [data[0]];
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][1]) !== email) kept.push(data[i]);
+  }
+
+  log.clearContents();
+  log.getRange(1,1,kept.length,kept[0].length).setValues(kept);
+
+  SpreadsheetApp.getUi().alert(
+    "Reset Complete",
+    "All attempts for this student have been cleared.",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+function lockSimInputs_() {
+  const sim = getSimSheet_();
+
+  // Hard lock both ranges
+  const p1 = sim.getRange(SIM_CELLS.focusChecks).protect().setDescription("Locked after SIM");
+const p2 = sim.getRange("C18:C19").protect().setDescription("Locked after SIM");
+
+
+  // Remove all editors so only the file owner can edit protected cells
+  [p1, p2].forEach(p => {
+    try {
+      p.removeEditors(p.getEditors());
+    } catch (e) {}
+    if (p.canDomainEdit()) p.setDomainEdit(false);
+  });
+}
+
