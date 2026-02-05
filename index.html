@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DELIVERY EMPIRE | Economic Strategy Game</title>
+<style>
+:root {
+  --bg: #0a0e1a;
+  --surface: #111827;
+  --surface2: #1e293b;
+  --border: #334155;
+  --text: #f1f5f9;
+  --text2: #94a3b8;
+  --accent: #3b82f6;
+  --accent2: #8b5cf6;
+  --gold: #f59e0b;
+  --silver: #94a3b8;
+  --bronze: #d97706;
+  --green: #10b981;
+  --red: #ef4444;
+  --pink: #ec4899;
+  --cyan: #06b6d4;
+  --neon: #00ff88;
+  --radius: 16px;
+  --glow: 0 0 30px rgba(59,130,246,0.3);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+#canvas-bg {
+  position: fixed; top:0; left:0; width:100%; height:100%;
+  z-index: 0; pointer-events: none;
+}
+.screen {
+  display: none;
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  padding: 20px;
+  animation: fadeIn 0.6s ease;
+}
+.screen.active { display: flex; flex-direction: column; align-items: center; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+@keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.05); } }
+@keyframes glow { 0%,100% { box-shadow: 0 0 20px rgba(59,130,246,0.4); } 50% { box-shadow: 0 0 40px rgba(59,130,246,0.8); } }
+@keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-10px)} 40%{transform:translateX(10px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)} }
+@keyframes slideUp { from { opacity:0; transform:translateY(40px); } to { opacity:1; transform:translateY(0); } }
+@keyframes countUp { from { opacity:0; transform:scale(0.5); } to { opacity:1; transform:scale(1); } }
+@keyframes flash { 0%{opacity:1} 50%{opacity:0.3} 100%{opacity:1} }
+@keyframes typing { from{width:0} to{width:100%} }
+@keyframes gradientShift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+@keyframes borderGlow {
+  0%,100% { border-color: var(--accent); box-shadow: 0 0 15px rgba(59,130,246,0.3); }
+  50% { border-color: var(--accent2); box-shadow: 0 0 25px rgba(139,92,246,0.5); }
+}
+@keyframes newsFlash {
+  0%,20%,40%,60%,80%,100% { background: rgba(239,68,68,0.15); }
+  10%,30%,50%,70%,90% { background: rgba(239,68,68,0.35); }
+}
+@keyframes revealTier {
+  0% { transform: scale(0) rotate(-180deg); opacity:0; }
+  60% { transform: scale(1.3) rotate(10deg); opacity:1; }
+  100% { transform: scale(1) rotate(0); opacity:1; }
+}
+@keyframes barFill { from { width: 0; } }
+@keyframes correctPop { 0%{transform:scale(1)} 50%{transform:scale(1.1)} 100%{transform:scale(1)} }
+
+/* Progress bar */
+#progress-bar {
+  position: fixed; top:0; left:0; width:100%; height:4px;
+  background: var(--surface2); z-index: 100;
+}
+#progress-fill {
+  height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2), var(--pink));
+  background-size: 200% 100%; animation: gradientShift 3s ease infinite;
+  transition: width 0.8s ease; width: 0%;
+}
+
+/* Title Screen */
+.title-container { text-align:center; margin-top: 15vh; }
+.title-logo {
+  font-size: clamp(3rem, 8vw, 6rem);
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--accent), var(--accent2), var(--pink), var(--cyan));
+  background-size: 300% 300%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradientShift 4s ease infinite;
+  letter-spacing: -2px;
+  line-height: 1.1;
+}
+.title-sub {
+  font-size: clamp(1rem, 2.5vw, 1.4rem);
+  color: var(--text2); margin-top: 12px;
+  letter-spacing: 0.15em; text-transform: uppercase;
+}
+.title-tagline {
+  font-size: 1.1rem; color: var(--text2); margin-top: 30px;
+  max-width: 500px; line-height: 1.6;
+}
+.brand-badge {
+  display: inline-block; margin-top: 20px; padding: 6px 16px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 30px; font-size: 0.75rem; color: var(--text2);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 14px 36px; border: none; border-radius: 12px;
+  font-size: 1rem; font-weight: 700; cursor: pointer;
+  transition: all 0.3s ease; text-transform: uppercase;
+  letter-spacing: 0.08em; position: relative; overflow: hidden;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white; box-shadow: 0 4px 20px rgba(59,130,246,0.4);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(59,130,246,0.6); }
+.btn-primary:active { transform: translateY(0); }
+.btn-lg { padding: 18px 48px; font-size: 1.15rem; border-radius: 14px; }
+.btn-gold { background: linear-gradient(135deg, #f59e0b, #d97706); color: #1a1a2e; }
+.btn-outline {
+  background: transparent; border: 2px solid var(--border);
+  color: var(--text); backdrop-filter: blur(10px);
+}
+.btn-outline:hover { border-color: var(--accent); background: rgba(59,130,246,0.1); }
+.btn-danger { background: linear-gradient(135deg, var(--red), #dc2626); color: white; }
+.btn:disabled { opacity:0.4; cursor:not-allowed; transform:none !important; }
+.btn-start {
+  margin-top: 40px; animation: pulse 2s ease infinite;
+}
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: var(--glow); }
+.card.selected {
+  border-color: var(--neon);
+  box-shadow: 0 0 30px rgba(0,255,136,0.3);
+  background: linear-gradient(135deg, rgba(0,255,136,0.08), rgba(59,130,246,0.08));
+}
+.card.selected::after {
+  content: '✓'; position: absolute; top: 12px; right: 12px;
+  width: 28px; height: 28px; background: var(--neon);
+  color: var(--bg); border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-weight: 900;
+  font-size: 0.85rem;
+}
+.card-icon { font-size: 2.5rem; margin-bottom: 12px; }
+.card-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 8px; }
+.card-desc { font-size: 0.85rem; color: var(--text2); line-height: 1.5; }
+.card-stats { display:flex; gap:12px; margin-top:12px; flex-wrap:wrap; }
+.card-stat {
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+}
+.card-stat.positive { color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+.card-stat.negative { color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+
+/* Focus Selection Grid */
+.focus-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px; max-width: 1100px; width: 100%;
+  margin: 20px 0;
+}
+
+/* Allocation Slider */
+.alloc-section {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 28px; max-width: 600px; width: 100%;
+  border: 1px solid var(--border); margin: 20px 0;
+  animation: slideUp 0.5s ease;
+}
+.alloc-label { display:flex; justify-content:space-between; margin-bottom:12px; font-weight:600; }
+.alloc-slider {
+  width: 100%; height: 8px; -webkit-appearance: none;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 4px; outline: none;
+}
+.alloc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 24px; height: 24px;
+  background: white; border-radius: 50%; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.alloc-values {
+  display: flex; justify-content: space-between; margin-top: 16px;
+  font-size: 2rem; font-weight: 900;
+}
+.alloc-values span { min-width: 80px; text-align: center; }
+
+/* Dashboard / Meters */
+.dashboard {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px; max-width: 1000px; width: 100%; margin: 20px 0;
+}
+.meter-card {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 24px; text-align: center; border: 1px solid var(--border);
+  animation: slideUp 0.5s ease;
+}
+.meter-label { font-size: 0.85rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+.meter-value {
+  font-size: 3rem; font-weight: 900;
+  animation: countUp 0.8s ease;
+}
+.meter-bar {
+  width: 100%; height: 8px; background: var(--surface2);
+  border-radius: 4px; margin-top: 12px; overflow: hidden;
+}
+.meter-fill {
+  height: 100%; border-radius: 4px;
+  animation: barFill 1.5s ease;
+  transition: width 1s ease;
+}
+.meter-delta {
+  font-size: 0.9rem; margin-top: 8px; font-weight: 700;
+}
+.meter-delta.positive { color: var(--green); }
+.meter-delta.negative { color: var(--red); }
+.health-card {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1));
+  border-color: var(--accent);
+}
+
+/* Section Headers */
+.section-header {
+  text-align: center; margin: 30px 0 20px; max-width: 700px;
+}
+.section-header h2 {
+  font-size: clamp(1.5rem, 4vw, 2.2rem); font-weight: 800;
+  margin-bottom: 8px;
+}
+.section-header p { color: var(--text2); font-size: 1rem; line-height: 1.6; }
+.phase-badge {
+  display: inline-block; padding: 4px 14px; border-radius: 20px;
+  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; margin-bottom: 12px;
+  background: rgba(59,130,246,0.15); color: var(--accent);
+  border: 1px solid rgba(59,130,246,0.3);
+}
+
+/* Narrative Box */
+.narrative {
+  background: var(--surface); border-left: 4px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 24px 28px; max-width: 700px; width: 100%;
+  margin: 20px 0; font-size: 1.05rem; line-height: 1.7;
+  color: var(--text2);
+}
+.narrative strong { color: var(--text); }
+
+/* Quiz Styles */
+.quiz-container {
+  max-width: 750px; width: 100%; margin: 10px 0;
+}
+.quiz-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+}
+.quiz-progress { font-size: 0.85rem; color: var(--text2); }
+.quiz-score {
+  padding: 6px 16px; background: var(--surface);
+  border-radius: 20px; font-weight: 700; font-size: 0.9rem;
+  border: 1px solid var(--border);
+}
+.quiz-streak {
+  padding: 6px 16px; background: rgba(245,158,11,0.15);
+  border-radius: 20px; font-weight: 700; font-size: 0.9rem;
+  color: var(--gold); border: 1px solid rgba(245,158,11,0.3);
+  display: none;
+}
+.quiz-streak.active { display: inline-block; animation: pulse 1s ease infinite; }
+.quiz-timer {
+  width: 100%; height: 4px; background: var(--surface2);
+  border-radius: 2px; margin-bottom: 20px; overflow: hidden;
+}
+.quiz-timer-fill {
+  height: 100%; background: linear-gradient(90deg, var(--green), var(--gold), var(--red));
+  transition: width 0.5s linear; width: 100%;
+}
+.quiz-question {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 28px; margin-bottom: 20px;
+  border: 1px solid var(--border);
+  font-size: 1.1rem; line-height: 1.6;
+}
+.quiz-concept {
+  display: inline-block; padding: 3px 10px; border-radius: 12px;
+  font-size: 0.7rem; color: var(--cyan); margin-top: 10px;
+  background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.25);
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.quiz-options { display: flex; flex-direction: column; gap: 10px; }
+.quiz-option {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; background: var(--surface);
+  border: 2px solid var(--border); border-radius: 12px;
+  cursor: pointer; transition: all 0.25s ease;
+  font-size: 1rem; text-align: left;
+}
+.quiz-option:hover { border-color: var(--accent); background: rgba(59,130,246,0.08); transform: translateX(4px); }
+.quiz-option .letter {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: var(--surface2); display: flex; align-items: center;
+  justify-content: center; font-weight: 900; font-size: 0.9rem;
+  flex-shrink: 0; transition: all 0.25s ease;
+}
+.quiz-option:hover .letter { background: var(--accent); color: white; }
+.quiz-option.correct {
+  border-color: var(--green); background: rgba(16,185,129,0.12);
+  animation: correctPop 0.4s ease;
+}
+.quiz-option.correct .letter { background: var(--green); color: white; }
+.quiz-option.wrong {
+  border-color: var(--red); background: rgba(239,68,68,0.12);
+  animation: shake 0.4s ease;
+}
+.quiz-option.wrong .letter { background: var(--red); color: white; }
+.quiz-option.disabled { pointer-events: none; opacity: 0.5; }
+.quiz-option.reveal-correct { border-color: var(--green); opacity: 1 !important; }
+.quiz-feedback {
+  margin-top: 16px; padding: 16px 20px;
+  border-radius: 12px; font-size: 0.95rem;
+  animation: slideUp 0.3s ease; display: none; line-height: 1.5;
+}
+.quiz-feedback.show { display: block; }
+.quiz-feedback.correct-fb { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }
+.quiz-feedback.wrong-fb { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+
+/* Shock Event */
+.shock-banner {
+  background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.05));
+  border: 2px solid var(--red); border-radius: var(--radius);
+  padding: 32px; max-width: 700px; width: 100%;
+  text-align: center; animation: newsFlash 2s ease 3;
+}
+.shock-banner h2 {
+  color: var(--red); font-size: 1.8rem; margin-bottom: 8px;
+  letter-spacing: 0.1em;
+}
+.shock-desc {
+  font-size: 1.1rem; color: var(--text2); line-height: 1.6; margin-top: 12px;
+}
+.response-grid {
+  display: grid; grid-template-columns: 1fr;
+  gap: 14px; max-width: 700px; width: 100%; margin: 20px 0;
+}
+.response-card {
+  background: var(--surface); border: 2px solid var(--border);
+  border-radius: var(--radius); padding: 20px 24px;
+  cursor: pointer; transition: all 0.3s ease;
+  text-align: left;
+}
+.response-card:hover { border-color: var(--accent); transform: translateX(6px); box-shadow: var(--glow); }
+.response-card.selected { border-color: var(--neon); box-shadow: 0 0 25px rgba(0,255,136,0.25); }
+.response-card h4 { font-size: 1rem; margin-bottom: 6px; }
+.response-card p { font-size: 0.85rem; color: var(--text2); }
+
+/* Results */
+.results-container {
+  max-width: 700px; width: 100%; text-align: center;
+}
+.tier-reveal {
+  font-size: clamp(3rem, 8vw, 5rem); font-weight: 900;
+  animation: revealTier 1s ease;
+  margin: 20px 0;
+}
+.tier-gold { color: var(--gold); text-shadow: 0 0 40px rgba(245,158,11,0.5); }
+.tier-silver { color: var(--silver); text-shadow: 0 0 40px rgba(148,163,184,0.5); }
+.tier-bronze { color: var(--bronze); text-shadow: 0 0 40px rgba(217,119,6,0.5); }
+.tier-fail { color: var(--red); text-shadow: 0 0 40px rgba(239,68,68,0.5); }
+.claim-code {
+  display: inline-block; padding: 14px 32px;
+  background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(217,119,6,0.15));
+  border: 2px solid var(--gold); border-radius: 12px;
+  font-size: 1.4rem; font-weight: 900; letter-spacing: 0.15em;
+  color: var(--gold); margin: 16px 0;
+  animation: borderGlow 2s ease infinite;
+}
+.score-breakdown {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px; margin: 24px 0; text-align: center;
+}
+.score-item {
+  background: var(--surface); border-radius: 12px;
+  padding: 18px; border: 1px solid var(--border);
+}
+.score-item .label { font-size: 0.8rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; }
+.score-item .value { font-size: 1.8rem; font-weight: 900; margin-top: 6px; }
+.concept-mastery {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 24px; margin: 20px 0; text-align: left;
+  border: 1px solid var(--border); width: 100%;
+}
+.concept-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.concept-row:last-child { border-bottom: none; }
+.concept-status { font-weight: 700; font-size: 0.85rem; }
+.concept-status.strong { color: var(--green); }
+.concept-status.review { color: var(--gold); }
+
+/* Confetti Canvas */
+#confetti-canvas {
+  position: fixed; top:0; left:0; width:100%; height:100%;
+  z-index: 200; pointer-events: none;
+}
+
+/* Screen shake */
+.screen-shake { animation: shake 0.5s ease !important; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .focus-grid { grid-template-columns: 1fr 1fr; }
+  .dashboard { grid-template-columns: 1fr 1fr; }
+  .score-breakdown { grid-template-columns: 1fr 1fr; }
+  .quiz-header { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 480px) {
+  .focus-grid { grid-template-columns: 1fr; }
+  .dashboard { grid-template-columns: 1fr; }
+  .screen { padding: 12px; }
+}
+
+/* Misc */
+.mt-2 { margin-top: 16px; }
+.mt-3 { margin-top: 24px; }
+.mb-2 { margin-bottom: 16px; }
+.text-center { text-align: center; }
+.text-muted { color: var(--text2); }
+.text-sm { font-size: 0.85rem; }
+.hidden { display: none !important; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
+</style>
+</head>
+<body>
+<canvas id="canvas-bg"></canvas>
+<div id="progress-bar"><div id="progress-fill"></div></div>
+<canvas id="confetti-canvas" class="hidden"></canvas>
+
+<!-- ========== SCREEN: TITLE ========== -->
+<div id="screen-title" class="screen active">
+  <div class="title-container">
+    <div class="brand-badge">BOW Sports Capital &middot; Module 3</div>
+    <h1 class="title-logo" style="margin-top:16px;">DELIVERY<br>EMPIRE</h1>
+    <p class="title-sub">Economic Strategy Simulation</p>
+    <p class="title-tagline">
+      Build a food-delivery startup from scratch. Make strategic decisions, survive market shocks, and prove your economic thinking.
+    </p>
+    <button class="btn btn-primary btn-lg btn-start" onclick="showScreen('screen-setup')">
+      Start Mission
+    </button>
+    <p class="text-sm text-muted mt-3">7 economic concepts &middot; 25 challenge questions &middot; 1 crisis event</p>
+  </div>
+</div>
+
+<!-- ========== SCREEN: SETUP ========== -->
+<div id="screen-setup" class="screen">
+  <div class="section-header" style="margin-top:10vh;">
+    <span class="phase-badge">Mission Briefing</span>
+    <h2>Welcome, CEO</h2>
+    <p>Before we begin, let's get you set up.</p>
+  </div>
+  <div class="narrative">
+    <strong>Your mission:</strong> You've just been hired as CEO of a food-delivery startup.
+    Your platform must serve <strong>customers</strong>, <strong>restaurants</strong>, and <strong>drivers</strong>.
+    But here's the catch &mdash; you can't excel at everything. You have limited resources and must decide
+    where to focus your efforts.<br><br>
+    <strong>The 7 economic concepts</strong> you'll need to master:<br>
+    Expected Value &bull; Opportunity Cost &bull; Signal vs. Noise &bull; Comparative Advantage &bull;
+    Market Inefficiency &bull; Asymmetric Information &bull; Efficiency
+  </div>
+  <div style="max-width:400px;width:100%;margin-top:20px;">
+    <label style="font-size:0.85rem;color:var(--text2);display:block;margin-bottom:8px;">YOUR NAME</label>
+    <input id="player-name" type="text" placeholder="Enter your name..."
+      style="width:100%;padding:14px 18px;border-radius:12px;border:2px solid var(--border);
+      background:var(--surface);color:var(--text);font-size:1rem;outline:none;transition:border-color 0.3s;"
+      onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"
+      onkeydown="if(event.key==='Enter')startGame()">
+  </div>
+  <button class="btn btn-primary btn-lg mt-3" onclick="startGame()">Begin Simulation</button>
+</div>
+
+<!-- ========== SCREEN: SPECIALIZATION ========== -->
+<div id="screen-specialize" class="screen">
+  <div class="section-header">
+    <span class="phase-badge">Phase 1 &mdash; Strategy</span>
+    <h2>Choose Your Focus</h2>
+    <p>Select <strong>1 or 2</strong> areas to specialize in. You can't do everything well &mdash; that's the point.</p>
+  </div>
+  <div class="focus-grid" id="focus-grid"></div>
+  <div id="alloc-section" class="alloc-section hidden">
+    <h3 style="margin-bottom:16px;">Allocate Your Effort</h3>
+    <div class="alloc-label">
+      <span id="alloc-label-1">Focus 1</span>
+      <span id="alloc-label-2">Focus 2</span>
+    </div>
+    <input type="range" min="20" max="80" value="50" class="alloc-slider" id="alloc-slider"
+      oninput="updateAllocation(this.value)">
+    <div class="alloc-values">
+      <span id="alloc-val-1" style="color:var(--accent)">50%</span>
+      <span style="color:var(--text2);font-size:1rem;">|</span>
+      <span id="alloc-val-2" style="color:var(--accent2)">50%</span>
+    </div>
+  </div>
+  <button id="btn-lock-strategy" class="btn btn-primary btn-lg mt-2" onclick="lockStrategy()" disabled>
+    Lock In Strategy
+  </button>
+</div>
+
+<!-- ========== SCREEN: PRE-SHOCK DASHBOARD ========== -->
+<div id="screen-dashboard-pre" class="screen">
+  <div class="section-header">
+    <span class="phase-badge">Phase 2 &mdash; Launch</span>
+    <h2>Your Startup is Live!</h2>
+    <p>Based on your strategy, here's how your system is performing.</p>
+  </div>
+  <div class="dashboard" id="dashboard-pre"></div>
+  <button class="btn btn-primary btn-lg mt-3" onclick="startMCQ('PRE')">
+    Begin Assessment &rarr;
+  </button>
+</div>
+
+<!-- ========== SCREEN: MCQ ========== -->
+<div id="screen-mcq" class="screen">
+  <div class="section-header">
+    <span class="phase-badge" id="mcq-phase-badge">Assessment</span>
+    <h2 id="mcq-title">Knowledge Check</h2>
+    <p id="mcq-subtitle"></p>
+  </div>
+  <div class="quiz-container">
+    <div class="quiz-header">
+      <span class="quiz-progress" id="quiz-progress">Question 1 of 7</span>
+      <span class="quiz-streak" id="quiz-streak">🔥 Streak: 0</span>
+      <span class="quiz-score" id="quiz-score">Score: 0</span>
+    </div>
+    <div class="quiz-timer"><div class="quiz-timer-fill" id="quiz-timer-fill"></div></div>
+    <div class="quiz-question" id="quiz-question"></div>
+    <div class="quiz-options" id="quiz-options"></div>
+    <div class="quiz-feedback" id="quiz-feedback"></div>
+    <button class="btn btn-primary mt-3 hidden" id="quiz-next-btn" onclick="nextQuestion()">
+      Next Question &rarr;
+    </button>
+  </div>
+</div>
+
+<!-- ========== SCREEN: SHOCK EVENT ========== -->
+<div id="screen-shock" class="screen">
+  <div class="section-header" style="margin-top:8vh;">
+    <span class="phase-badge" style="background:rgba(239,68,68,0.15);color:var(--red);border-color:rgba(239,68,68,0.3);">
+      Breaking News
+    </span>
+    <h2 style="color:var(--red);" id="shock-title">MARKET SHOCK</h2>
+  </div>
+  <div class="shock-banner" id="shock-banner">
+    <h2 id="shock-scenario-name"></h2>
+    <p class="shock-desc" id="shock-desc"></p>
+  </div>
+  <div class="dashboard mt-3" id="dashboard-shock-impact" style="max-width:800px;"></div>
+  <button class="btn btn-danger btn-lg mt-3" onclick="showScreen('screen-response')">
+    Choose Your Response &rarr;
+  </button>
+</div>
+
+<!-- ========== SCREEN: RESPONSE ========== -->
+<div id="screen-response" class="screen">
+  <div class="section-header">
+    <span class="phase-badge" style="background:rgba(239,68,68,0.15);color:var(--red);border-color:rgba(239,68,68,0.3);">
+      Crisis Response
+    </span>
+    <h2>How Will You Respond?</h2>
+    <p>Each option has tradeoffs. Choose wisely &mdash; this decision is final.</p>
+  </div>
+  <div class="response-grid" id="response-grid"></div>
+  <button id="btn-lock-response" class="btn btn-danger btn-lg mt-2" onclick="lockResponse()" disabled>
+    Lock In Response
+  </button>
+</div>
+
+<!-- ========== SCREEN: POST-SHOCK DASHBOARD ========== -->
+<div id="screen-dashboard-post" class="screen">
+  <div class="section-header">
+    <span class="phase-badge">Post-Crisis Analysis</span>
+    <h2>Aftermath</h2>
+    <p>Here's how your system held up after the shock and your response.</p>
+  </div>
+  <div class="dashboard" id="dashboard-post"></div>
+  <button class="btn btn-primary btn-lg mt-3" id="btn-post-continue" onclick="continueAfterPost()">
+    Continue Assessment &rarr;
+  </button>
+</div>
+
+<!-- ========== SCREEN: RESULTS ========== -->
+<div id="screen-results" class="screen">
+  <div class="results-container">
+    <div class="section-header">
+      <span class="phase-badge">Final Results</span>
+      <h2 id="results-heading">Mission Complete</h2>
+    </div>
+    <div class="tier-reveal" id="tier-reveal"></div>
+    <div id="claim-code-area" class="hidden">
+      <p class="text-muted text-sm" style="margin-bottom:6px;">YOUR CREDENTIAL CLAIM CODE</p>
+      <div class="claim-code" id="claim-code-display"></div>
+    </div>
+    <div class="score-breakdown" id="score-breakdown"></div>
+    <div class="concept-mastery" id="concept-mastery">
+      <h3 style="margin-bottom:14px;">Concept Mastery</h3>
+      <div id="concept-rows"></div>
+    </div>
+    <button class="btn btn-primary btn-lg mt-3" onclick="restartGame()">Play Again</button>
+    <p class="text-sm text-muted mt-2">Your results have been saved locally.</p>
+  </div>
+</div>
+
+<script>
+// ==================== GAME ENGINE ====================
+const GAME = {
+  playerName: '',
+  selectedFocuses: [],
+  allocation: 50,
+  preScores: { demand: 0, cost: 0, partner: 0, innovation: 0, health: 0 },
+  postScores: { demand: 0, cost: 0, partner: 0, innovation: 0, health: 0 },
+  shockScenario: null,
+  shockResponse: null,
+  selectedResponseIdx: -1,
+  mcqScores: { PRE: null, MID: null, POST: null },
+  mcqMisses: {},
+  currentMCQ: null,
+  currentQuestionIdx: 0,
+  streak: 0,
+  maxStreak: 0,
+  phase: 'title',
+  totalCorrect: 0,
+  totalQuestions: 0
+};
+
+// ==================== FOCUS AREAS ====================
+const FOCUSES = [
+  {
+    key: 'QUALITY', name: 'Quality', icon: '⭐',
+    desc: 'Premium experience for every customer. High standards, high loyalty.',
+    pros: ['+Demand', '+Partners'], cons: ['-Cost', '-Innovation']
+  },
+  {
+    key: 'GROWTH', name: 'Growth', icon: '🚀',
+    desc: 'Scale fast. Capture market share before competitors can react.',
+    pros: ['+Demand', '+Innovation'], cons: ['-Cost', '-Partners']
+  },
+  {
+    key: 'COST', name: 'Cost Control', icon: '💰',
+    desc: 'Maximize efficiency. Every dollar counts when margins are thin.',
+    pros: ['+Cost Eff.', '+Partners'], cons: ['-Demand', '-Innovation']
+  },
+  {
+    key: 'PARTNERS', name: 'Partners', icon: '🤝',
+    desc: 'Build strong restaurant and driver relationships. Loyalty pays off.',
+    pros: ['+Partners', '+Cost Eff.'], cons: ['-Demand', '-Innovation']
+  },
+  {
+    key: 'INNOVATION', name: 'Innovation', icon: '💡',
+    desc: 'Push boundaries. New features, new markets, new possibilities.',
+    pros: ['+Innovation', '+Demand'], cons: ['-Cost', '-Partners']
+  }
+];
+
+const BASE_EFFECTS = {
+  QUALITY:    { demand: 18, cost: -10, partner: 12, innovation: -8 },
+  GROWTH:     { demand: 24, cost: -14, partner: -10, innovation: 14 },
+  COST:       { demand: -12, cost: 26, partner: 10, innovation: -10 },
+  PARTNERS:   { demand: -8, cost: 12, partner: 26, innovation: -10 },
+  INNOVATION: { demand: 14, cost: -16, partner: -12, innovation: 26 }
+};
+
+// ==================== SHOCK LIBRARY ====================
+const SHOCK_LIBRARY = {
+  COST_SPIKE: {
+    name: 'COST SPIKE',
+    desc: 'Fuel prices surge 40% overnight. Labor costs spike. Your margins are getting crushed and every delivery now costs more than projected.',
+    effects: { demand: -6, cost: -4, partner: -10, innovation: -2 },
+    responses: [
+      { label: 'Raise prices immediately to protect margin', desc: 'Pass costs to customers. Margins stay safe, but you might lose order volume.', effects: { demand: -6, cost: 0, partner: 0, innovation: 2 } },
+      { label: 'Cut non-essential spending to keep runway', desc: 'Trim marketing, perks, and extras. Preserve cash while keeping prices stable.', effects: { demand: -2, cost: 2, partner: 4, innovation: 0 } },
+      { label: 'Negotiate supplier contracts (takes time)', desc: 'Work with vendors to lock in better long-term rates. Slower but sustainable.', effects: { demand: -1, cost: 4, partner: 1, innovation: 1 } }
+    ]
+  },
+  PARTNER_EXIT: {
+    name: 'PARTNER EXIT',
+    desc: 'Your biggest restaurant partner — 30% of your orders — threatens to leave unless you give them better terms. Other partners are watching closely.',
+    effects: { demand: -4, cost: -12, partner: -3, innovation: -4 },
+    responses: [
+      { label: 'Offer better revenue share to keep them', desc: 'Give them what they want. Keep the relationship but eat into your margins.', effects: { demand: 2, cost: 8, partner: 0, innovation: -1 } },
+      { label: 'Replace them with smaller alternatives', desc: 'Diversify your partner base. Less dependency, but takes effort to rebuild volume.', effects: { demand: -1, cost: 4, partner: 1, innovation: 2 } },
+      { label: 'Build a direct-to-customer channel', desc: 'Go around partners entirely with your own kitchen partnerships. Bold but risky.', effects: { demand: 0, cost: -2, partner: 4, innovation: 4 } }
+    ]
+  },
+  PLATFORM_OUTAGE: {
+    name: 'PLATFORM OUTAGE',
+    desc: 'A critical server failure takes your platform down for 6 hours during peak dinner rush. Thousands of orders fail. Social media erupts with complaints.',
+    effects: { demand: -10, cost: -6, partner: -12, innovation: -4 },
+    responses: [
+      { label: 'Pause growth and harden reliability', desc: 'Freeze new features and invest everything in infrastructure stability.', effects: { demand: -2, cost: 2, partner: 10, innovation: 0 } },
+      { label: 'Issue credits + transparent communication', desc: 'Own the failure publicly. Give refunds and credits. Rebuild trust through honesty.', effects: { demand: 1, cost: 4, partner: 4, innovation: 0 } },
+      { label: 'Ship fast hotfixes (risk more bugs)', desc: 'Move fast to patch issues. Might introduce new problems but shows speed.', effects: { demand: 3, cost: -1, partner: 2, innovation: 2 } }
+    ]
+  }
+};
+
+// ==================== MCQ QUESTIONS ====================
+const MCQ_BANK = {
+  PRE: [
+    {
+      q: "A delivery startup is choosing between two expansion cities. City A has a 60% chance of generating $500K revenue, while City B has a 90% chance of generating $300K. Using expected value, which is the better bet?",
+      options: ["City A, because $500K is more money", "City B, because higher probability guarantees success", "City A, because 60% × $500K = $300K equals 90% × $300K = $270K", "Neither — you need more data to decide"],
+      answer: 2, concept: "Expected Value",
+      explanation: "Expected Value = probability × outcome. City A: 0.6 × $500K = $300K. City B: 0.9 × $300K = $270K. City A has a higher expected value despite more uncertainty."
+    },
+    {
+      q: "You allocate your entire engineering team to build a loyalty rewards program. What does opportunity cost tell you about this decision?",
+      options: ["The cost is just the engineers' salaries", "The real cost includes whatever else those engineers could have built instead", "There is no cost if the loyalty program succeeds", "Opportunity cost only applies to financial decisions"],
+      answer: 1, concept: "Opportunity Cost",
+      explanation: "Opportunity cost is the value of the best alternative you gave up. Those engineers could have improved delivery speed, built new features, or fixed bugs — that's the real cost."
+    },
+    {
+      q: "Your daily order count jumps 40% on a random Tuesday. Your growth lead wants to hire 10 more drivers immediately. What concept should guide your response?",
+      options: ["Expected Value — calculate the hiring ROI", "Market Inefficiency — exploit the surge", "Signal vs. Noise — determine if this is a real trend or random variance", "Comparative Advantage — hire specialists"],
+      answer: 2, concept: "Signal vs. Noise",
+      explanation: "A single day's spike could be noise (random fluctuation) or signal (real trend). You need more data points before making expensive commitments based on one observation."
+    },
+    {
+      q: "Your startup is decent at marketing, delivery speed, and restaurant onboarding — but world-class at none. What does comparative advantage suggest?",
+      options: ["Keep doing everything to stay well-rounded", "Double down on whatever you're relatively best at, even if others are good too", "Copy what the market leader does", "Quit and join a bigger company"],
+      answer: 1, concept: "Comparative Advantage",
+      explanation: "Comparative advantage means focusing on what you do relatively better than alternatives — even if you're not the absolute best. Specialization creates defensible strengths."
+    },
+    {
+      q: "You discover that restaurant partners in suburban areas are undervalued — competitors focus only on dense urban zones. This represents:",
+      options: ["A signal to avoid suburbs", "A market inefficiency you could exploit", "Evidence that suburbs are unprofitable", "Normal competitive behavior"],
+      answer: 1, concept: "Market Inefficiency",
+      explanation: "When the market consistently undervalues or overlooks something (suburban restaurants), it creates an opportunity for those who can spot and exploit the mismatch."
+    },
+    {
+      q: "A restaurant partner knows their kitchen can't handle your projected order volume but doesn't tell you. This is an example of:",
+      options: ["Poor management", "Market inefficiency", "Asymmetric information — they know something you don't", "Signal vs. noise"],
+      answer: 2, concept: "Asymmetric Information",
+      explanation: "Asymmetric information occurs when one party in a transaction has more knowledge than the other. The restaurant's hidden capacity issue could damage your customer experience."
+    },
+    {
+      q: "Startup A spends $2M to acquire 10,000 customers. Startup B spends $800K to acquire 8,000 customers. Which demonstrates better efficiency?",
+      options: ["Startup A — more customers is always better", "Startup B — similar results with far fewer resources", "Both are equal since total customers differ", "Efficiency doesn't apply to customer acquisition"],
+      answer: 1, concept: "Efficiency",
+      explanation: "Efficiency means getting strong results with limited resources. Startup B acquired 80% of the customers at 40% of the cost — that's significantly more efficient ($100/customer vs. $200/customer)."
+    }
+  ],
+  MID: [
+    {
+      q: "You chose two focus areas instead of one. Based on your simulation results, what fundamental tradeoff does this create?",
+      options: ["No tradeoff — more focus areas means more strength", "Your resources split between areas, making each weaker than a single-focus strategy", "It only matters if you pick the wrong combination", "Two focuses always outperform one focus"],
+      answer: 1, concept: "Opportunity Cost",
+      explanation: "Splitting resources between two areas means neither gets your full attention. This is opportunity cost in action — the strength you sacrifice in one area is the price of investing in another."
+    },
+    {
+      q: "If you allocated 70/30 between your focuses, the 30% focus area shows weaker scores. This demonstrates:",
+      options: ["A bug in the simulation", "Expected value — lower investment yields lower expected returns proportionally", "That you should always split 50/50", "The 30% focus is irrelevant"],
+      answer: 1, concept: "Expected Value",
+      explanation: "Expected value scales with investment. Putting 30% of resources into an area naturally produces proportionally weaker results — your expected return scales with commitment."
+    },
+    {
+      q: "Your competitor just raised $50M in funding and is offering free delivery everywhere. How should you interpret this?",
+      options: ["Panic and match their free delivery offer", "Ignore them completely", "Analyze whether this is a sustainable signal or temporary noise from VC money burning", "Immediately sell your company"],
+      answer: 2, concept: "Signal vs. Noise",
+      explanation: "VC-subsidized free delivery is often noise — unsustainable behavior that creates temporary market distortion. The signal to watch for is whether they can maintain it profitably."
+    },
+    {
+      q: "You discover your competitor charges restaurants 25% commission vs. your 18%. Despite this, restaurants prefer your competitor. This likely means:",
+      options: ["Your competitor is cheating", "The competitor provides enough additional value to justify higher commission — possible asymmetric info", "Commission rates don't matter", "You should raise your rates to 25%"],
+      answer: 1, concept: "Asymmetric Information",
+      explanation: "The competitor may know something about what restaurants truly value (better order volume, marketing support, data). The information gap explains why higher price still wins."
+    },
+    {
+      q: "A startup focused on just one area (e.g., Quality) versus one that split across four areas. Based on economic theory, the focused startup typically:",
+      options: ["Fails because it's not diversified enough", "Builds deeper competitive advantage in its core area through comparative advantage", "Has the same outcomes on average", "Can never adapt to change"],
+      answer: 1, concept: "Comparative Advantage",
+      explanation: "Comparative advantage rewards specialization. A focused startup builds expertise that's hard to replicate, creating a deeper moat than a generalist spreading thin."
+    },
+    {
+      q: "You chose Cost Control as a focus, which boosted your Cost Efficiency but lowered Demand and Innovation scores. This tradeoff exemplifies:",
+      options: ["Bad strategy", "The efficiency principle — you got strong results in your chosen area with limited resources", "That Cost Control is a weak strategy", "Random simulation outcomes"],
+      answer: 1, concept: "Efficiency",
+      explanation: "Getting strong results in your target area while accepting predictable weakness elsewhere IS efficiency. You maximized output in your chosen domain with the resources available."
+    },
+    {
+      q: "Your pre-shock dashboard shows 50/50 split resulted in moderate scores across both areas. An 80/20 split would have meant:",
+      options: ["Identical scores — the split doesn't matter", "One strong area and one weaker area — a deliberate tradeoff", "Complete failure in the weaker area", "The simulation would break"],
+      answer: 1, concept: "Expected Value",
+      explanation: "80/20 creates asymmetric expected outcomes: your primary focus gets 80% of the resources and performs much stronger, while the secondary gets a smaller but still meaningful boost."
+    }
+  ],
+  POST: [
+    {
+      q: "After the market shock, startups that had focused deeply on 1-2 areas generally recovered faster than generalists. Why?",
+      options: ["Pure luck", "Deep expertise in core areas provided resilience — their comparative advantage created a recovery foundation", "Shocks don't affect focused startups", "They had more funding"],
+      answer: 1, concept: "Comparative Advantage",
+      explanation: "Focused startups had deeper strengths to rely on during the crisis. Their comparative advantage wasn't eliminated by the shock — it became their recovery anchor."
+    },
+    {
+      q: "During the shock, you had to choose between quick fixes and long-term solutions. The best response depends on:",
+      options: ["Always choosing the cheapest option", "Your pre-existing strengths and the specific nature of the disruption — matching response to context", "What your competitors do", "Random chance"],
+      answer: 1, concept: "Expected Value",
+      explanation: "The optimal response maximizes expected value given your unique position. A cost-focused startup responds differently than a growth-focused one because their strengths differ."
+    },
+    {
+      q: "The market shock revealed that your pre-shock System Health score was:",
+      options: ["Irrelevant to recovery", "A critical factor in post-shock resilience — higher pre-shock health meant more buffer", "The only thing that determined outcomes", "Completely random"],
+      answer: 1, concept: "Efficiency",
+      explanation: "Pre-shock health acted as a buffer. Higher efficiency before the shock meant more room to absorb the impact — but response strategy still mattered for recovery."
+    },
+    {
+      q: "Choosing to negotiate supplier contracts (slow response) over raising prices (fast response) represents a bet on:",
+      options: ["Laziness", "Long-term expected value over short-term relief — accepting delayed payoff for bigger sustainable gains", "Suppliers always cooperating", "Government intervention"],
+      answer: 1, concept: "Expected Value",
+      explanation: "Negotiating contracts has a higher expected value long-term but requires patience. Raising prices is fast but may destroy demand. This is a classic expected value timing tradeoff."
+    },
+    {
+      q: "When a major partner threatens to leave, offering better revenue share is risky because:",
+      options: ["Partners should never get better terms", "It reduces your margins and signals to other partners that threats work — an information asymmetry problem", "It's always wrong to negotiate", "Revenue sharing is illegal"],
+      answer: 1, concept: "Asymmetric Information",
+      explanation: "Other partners are watching. If they learn threats earn better terms, you've created an incentive structure based on asymmetric information that will be exploited."
+    },
+    {
+      q: "Building a direct-to-customer channel after partner problems shows understanding of:",
+      options: ["Giving up on partnerships", "Reducing dependency by creating your own comparative advantage in a new area", "That partners are always unreliable", "Nothing — it's a panic move"],
+      answer: 1, concept: "Comparative Advantage",
+      explanation: "Building direct channels is a strategic pivot to create a new comparative advantage. It reduces vulnerability to partner-related shocks and creates optionality."
+    },
+    {
+      q: "After a platform outage, transparent communication with users works because:",
+      options: ["People enjoy reading corporate emails", "It reduces information asymmetry — users understand what happened and what you're doing about it", "It's legally required in all states", "It distracts from the real problems"],
+      answer: 1, concept: "Asymmetric Information",
+      explanation: "Asymmetric information breeds distrust. Transparency closes the information gap, letting users make informed decisions rather than assuming the worst."
+    },
+    {
+      q: "A startup scoring 90 pre-shock but 55 post-shock likely had:",
+      options: ["Perfect management before the shock", "Fragile, concentrated strengths that looked impressive but couldn't withstand disruption — noise masking weak foundations", "Bad employees", "Incorrect simulation results"],
+      answer: 1, concept: "Signal vs. Noise",
+      explanation: "The high pre-shock score was partly noise — it masked underlying fragility. True resilience (signal) is only revealed under stress. The shock separated real strength from illusion."
+    },
+    {
+      q: "The shock scenario demonstrated that unpredictable events in business test whether your strategy is robust. This is the core idea of:",
+      options: ["Opportunity cost", "Signal vs. Noise — shocks reveal which strategies were real signals of strength vs. noise", "Efficiency only", "None of these concepts"],
+      answer: 1, concept: "Signal vs. Noise",
+      explanation: "Market shocks are nature's stress tests. They separate signal (genuine strategic strength) from noise (inflated metrics that only work in calm conditions)."
+    },
+    {
+      q: "Looking at your final scores — why is it impossible to maximize ALL four system metrics simultaneously?",
+      options: ["The simulation is rigged", "Opportunity cost — every resource spent on one metric is unavailable for another. Scarcity forces tradeoffs", "Poor game design", "It would be too easy"],
+      answer: 1, concept: "Opportunity Cost",
+      explanation: "This is the fundamental economic truth: scarcity forces tradeoffs. You can't maximize everything because resources (time, money, attention) spent in one area can't be spent in another."
+    },
+    {
+      q: "If you could play this simulation again with perfect information about the shock, your strategy would change. This reveals that your first decision was made under:",
+      options: ["Complete certainty", "Conditions of asymmetric information and uncertainty — you had to decide without knowing the future", "No useful principles", "Random chance"],
+      answer: 1, concept: "Asymmetric Information",
+      explanation: "Real decisions happen under uncertainty. You lacked information about the future shock — a form of asymmetric information between you and reality. Good economic thinking helps you make the best decisions despite this."
+    }
+  ]
+};
+
+// ==================== SOUND ENGINE ====================
+const SFX = {
+  ctx: null,
+  init() {
+    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  },
+  play(type) {
+    try {
+      this.init();
+      const ctx = this.ctx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.value = 0.15;
+      if (type === 'click') { osc.frequency.value = 600; osc.type = 'sine'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1); osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.1); }
+      else if (type === 'correct') { osc.frequency.value = 523; osc.type = 'sine'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3); osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.15); setTimeout(() => { const o2 = ctx.createOscillator(); const g2 = ctx.createGain(); o2.connect(g2); g2.connect(ctx.destination); o2.frequency.value = 659; o2.type = 'sine'; g2.gain.value = 0.15; g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4); o2.start(ctx.currentTime); o2.stop(ctx.currentTime + 0.2); }, 120); }
+      else if (type === 'wrong') { osc.frequency.value = 200; osc.type = 'sawtooth'; gain.gain.value = 0.1; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3); osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3); }
+      else if (type === 'alarm') { osc.frequency.value = 440; osc.type = 'square'; gain.gain.value = 0.08; let t = ctx.currentTime; for (let i = 0; i < 6; i++) { osc.frequency.setValueAtTime(440, t); osc.frequency.setValueAtTime(880, t + 0.15); t += 0.3; } gain.gain.exponentialRampToValueAtTime(0.001, t); osc.start(ctx.currentTime); osc.stop(t); }
+      else if (type === 'fanfare') { const notes = [523, 659, 784, 1047]; notes.forEach((f, i) => { setTimeout(() => { const o = ctx.createOscillator(); const g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = f; o.type = 'sine'; g.gain.value = 0.15; g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4); o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.4); }, i * 200); }); }
+      else if (type === 'lock') { osc.frequency.value = 800; osc.type = 'sine'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2); osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.2); }
+    } catch (e) {}
+  }
+};
+
+// ==================== BACKGROUND PARTICLES ====================
+const BG = {
+  canvas: null, ctx: null, particles: [], w: 0, h: 0,
+  init() {
+    this.canvas = document.getElementById('canvas-bg');
+    this.ctx = this.canvas.getContext('2d');
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+    for (let i = 0; i < 60; i++) {
+      this.particles.push({
+        x: Math.random() * this.w, y: Math.random() * this.h,
+        r: Math.random() * 2 + 0.5, dx: (Math.random() - 0.5) * 0.3,
+        dy: (Math.random() - 0.5) * 0.3, alpha: Math.random() * 0.3 + 0.1
+      });
+    }
+    this.animate();
+  },
+  resize() {
+    this.w = this.canvas.width = window.innerWidth;
+    this.h = this.canvas.height = window.innerHeight;
+  },
+  animate() {
+    this.ctx.clearRect(0, 0, this.w, this.h);
+    this.particles.forEach(p => {
+      p.x += p.dx; p.y += p.dy;
+      if (p.x < 0) p.x = this.w; if (p.x > this.w) p.x = 0;
+      if (p.y < 0) p.y = this.h; if (p.y > this.h) p.y = 0;
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      this.ctx.fillStyle = `rgba(59, 130, 246, ${p.alpha})`;
+      this.ctx.fill();
+    });
+    // Draw connections
+    for (let i = 0; i < this.particles.length; i++) {
+      for (let j = i + 1; j < this.particles.length; j++) {
+        const dx = this.particles[i].x - this.particles[j].x;
+        const dy = this.particles[i].y - this.particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          this.ctx.beginPath();
+          this.ctx.moveTo(this.particles[i].x, this.particles[i].y);
+          this.ctx.lineTo(this.particles[j].x, this.particles[j].y);
+          this.ctx.strokeStyle = `rgba(59, 130, 246, ${0.06 * (1 - dist / 120)})`;
+          this.ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(() => this.animate());
+  }
+};
+
+// ==================== CONFETTI ====================
+const Confetti = {
+  canvas: null, ctx: null, pieces: [], running: false,
+  launch(color1, color2, color3) {
+    this.canvas = document.getElementById('confetti-canvas');
+    this.canvas.classList.remove('hidden');
+    this.ctx = this.canvas.getContext('2d');
+    this.canvas.width = window.innerWidth;
+    this.canvas.height = window.innerHeight;
+    this.pieces = [];
+    const colors = [color1, color2, color3, '#ffffff'];
+    for (let i = 0; i < 200; i++) {
+      this.pieces.push({
+        x: Math.random() * this.canvas.width,
+        y: Math.random() * this.canvas.height - this.canvas.height,
+        w: Math.random() * 10 + 5, h: Math.random() * 6 + 3,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        dx: (Math.random() - 0.5) * 4, dy: Math.random() * 4 + 2,
+        rot: Math.random() * 360, dr: (Math.random() - 0.5) * 8,
+        alpha: 1
+      });
+    }
+    this.running = true;
+    this.animate();
+    setTimeout(() => { this.running = false; }, 5000);
+  },
+  animate() {
+    if (!this.running) { this.canvas.classList.add('hidden'); return; }
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.pieces.forEach(p => {
+      p.x += p.dx; p.y += p.dy; p.rot += p.dr;
+      p.dy += 0.05;
+      if (p.y > this.canvas.height + 20) p.alpha = 0;
+      this.ctx.save();
+      this.ctx.translate(p.x, p.y);
+      this.ctx.rotate(p.rot * Math.PI / 180);
+      this.ctx.globalAlpha = p.alpha;
+      this.ctx.fillStyle = p.color;
+      this.ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      this.ctx.restore();
+    });
+    requestAnimationFrame(() => this.animate());
+  }
+};
+
+// ==================== SCREEN MANAGEMENT ====================
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  updateProgress(id);
+  SFX.play('click');
+}
+
+function updateProgress(screenId) {
+  const phases = ['screen-title','screen-setup','screen-specialize','screen-dashboard-pre',
+    'screen-mcq-pre','screen-shock','screen-response','screen-dashboard-post',
+    'screen-mcq-mid','screen-mcq-post','screen-results'];
+  const map = { 'screen-title': 0, 'screen-setup': 5, 'screen-specialize': 12,
+    'screen-dashboard-pre': 22, 'screen-mcq': 35, 'screen-shock': 50,
+    'screen-response': 58, 'screen-dashboard-post': 68, 'screen-results': 100 };
+  const pct = map[screenId] || 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+// ==================== GAME FLOW ====================
+function startGame() {
+  const name = document.getElementById('player-name').value.trim();
+  if (!name) { document.getElementById('player-name').style.borderColor = 'var(--red)'; return; }
+  GAME.playerName = name;
+  buildFocusGrid();
+  showScreen('screen-specialize');
+}
+
+function buildFocusGrid() {
+  const grid = document.getElementById('focus-grid');
+  grid.innerHTML = '';
+  FOCUSES.forEach((f, i) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.idx = i;
+    card.onclick = () => toggleFocus(i);
+    card.innerHTML = `
+      <div class="card-icon">${f.icon}</div>
+      <div class="card-title">${f.name}</div>
+      <div class="card-desc">${f.desc}</div>
+      <div class="card-stats">
+        ${f.pros.map(p => `<span class="card-stat positive">${p}</span>`).join('')}
+        ${f.cons.map(c => `<span class="card-stat negative">${c}</span>`).join('')}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function toggleFocus(idx) {
+  const pos = GAME.selectedFocuses.indexOf(idx);
+  if (pos >= 0) {
+    GAME.selectedFocuses.splice(pos, 1);
+  } else if (GAME.selectedFocuses.length < 2) {
+    GAME.selectedFocuses.push(idx);
+  } else {
+    return; // max 2
+  }
+  // Update UI
+  document.querySelectorAll('#focus-grid .card').forEach((c, i) => {
+    c.classList.toggle('selected', GAME.selectedFocuses.includes(i));
+  });
+  // Show/hide allocation
+  const allocSection = document.getElementById('alloc-section');
+  if (GAME.selectedFocuses.length === 2) {
+    allocSection.classList.remove('hidden');
+    document.getElementById('alloc-label-1').textContent = FOCUSES[GAME.selectedFocuses[0]].name;
+    document.getElementById('alloc-label-2').textContent = FOCUSES[GAME.selectedFocuses[1]].name;
+    updateAllocation(document.getElementById('alloc-slider').value);
+  } else {
+    allocSection.classList.add('hidden');
+  }
+  document.getElementById('btn-lock-strategy').disabled = GAME.selectedFocuses.length === 0;
+  SFX.play('click');
+}
+
+function updateAllocation(val) {
+  GAME.allocation = parseInt(val);
+  document.getElementById('alloc-val-1').textContent = val + '%';
+  document.getElementById('alloc-val-2').textContent = (100 - val) + '%';
+}
+
+function lockStrategy() {
+  if (GAME.selectedFocuses.length === 0) return;
+  SFX.play('lock');
+  // Calculate pre-shock scores
+  const baseline = { demand: 70, cost: 70, partner: 70, innovation: 70 };
+  const count = GAME.selectedFocuses.length;
+  let w1 = 1, w2 = 0;
+  if (count === 2) { w1 = GAME.allocation / 100; w2 = 1 - w1; }
+
+  const f1key = FOCUSES[GAME.selectedFocuses[0]].key;
+  const e1 = BASE_EFFECTS[f1key];
+  Object.keys(baseline).forEach(k => baseline[k] += e1[k] * w1);
+
+  if (count === 2) {
+    const f2key = FOCUSES[GAME.selectedFocuses[1]].key;
+    const e2 = BASE_EFFECTS[f2key];
+    Object.keys(baseline).forEach(k => baseline[k] += e2[k] * w2);
+  }
+
+  // Soft cap + clamp
+  const softCap = x => x <= 85 ? x : 85 + (x - 85) * 0.35;
+  GAME.preScores = {
+    demand: Math.round(Math.max(0, Math.min(100, softCap(baseline.demand)))),
+    cost: Math.round(Math.max(0, Math.min(100, softCap(baseline.cost)))),
+    partner: Math.round(Math.max(0, Math.min(100, softCap(baseline.partner)))),
+    innovation: Math.round(Math.max(0, Math.min(100, softCap(baseline.innovation))))
+  };
+  GAME.preScores.health = Math.round(
+    (GAME.preScores.demand + GAME.preScores.cost + GAME.preScores.partner + GAME.preScores.innovation) / 4
+  );
+
+  buildDashboard('dashboard-pre', GAME.preScores, null);
+  showScreen('screen-dashboard-pre');
+}
+
+// ==================== DASHBOARD ====================
+function buildDashboard(containerId, scores, prevScores) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  const metrics = [
+    { key: 'demand', label: 'Customer Demand', icon: '📦' },
+    { key: 'cost', label: 'Cost Efficiency', icon: '💰' },
+    { key: 'partner', label: 'Partner Stability', icon: '🤝' },
+    { key: 'innovation', label: 'Innovation Momentum', icon: '💡' }
+  ];
+
+  metrics.forEach((m, i) => {
+    const val = scores[m.key];
+    const color = val >= 75 ? 'var(--green)' : val >= 55 ? 'var(--gold)' : 'var(--red)';
+    let deltaHtml = '';
+    if (prevScores) {
+      const diff = val - prevScores[m.key];
+      const cls = diff >= 0 ? 'positive' : 'negative';
+      deltaHtml = `<div class="meter-delta ${cls}">${diff >= 0 ? '+' : ''}${diff}</div>`;
+    }
+    const card = document.createElement('div');
+    card.className = 'meter-card';
+    card.style.animationDelay = `${i * 0.15}s`;
+    card.innerHTML = `
+      <div class="meter-label">${m.icon} ${m.label}</div>
+      <div class="meter-value" style="color:${color};" data-target="${val}">0</div>
+      <div class="meter-bar"><div class="meter-fill" style="width:${val}%;background:${color};"></div></div>
+      ${deltaHtml}
+    `;
+    container.appendChild(card);
+  });
+
+  // Health card
+  const healthVal = scores.health;
+  const healthColor = healthVal >= 75 ? 'var(--green)' : healthVal >= 55 ? 'var(--gold)' : 'var(--red)';
+  let healthDelta = '';
+  if (prevScores) {
+    const diff = healthVal - prevScores.health;
+    const cls = diff >= 0 ? 'positive' : 'negative';
+    healthDelta = `<div class="meter-delta ${cls}" style="font-size:1.1rem;">${diff >= 0 ? '+' : ''}${diff}</div>`;
+  }
+  const healthCard = document.createElement('div');
+  healthCard.className = 'meter-card health-card';
+  healthCard.style.animationDelay = '0.6s';
+  healthCard.innerHTML = `
+    <div class="meter-label">⚡ System Health (Average)</div>
+    <div class="meter-value" style="color:${healthColor};font-size:3.5rem;" data-target="${healthVal}">0</div>
+    <div class="meter-bar" style="height:12px;"><div class="meter-fill" style="width:${healthVal}%;background:${healthColor};"></div></div>
+    ${healthDelta}
+  `;
+  container.appendChild(healthCard);
+
+  // Animate numbers
+  setTimeout(() => animateCounters(container), 300);
+}
+
+function animateCounters(container) {
+  container.querySelectorAll('.meter-value[data-target]').forEach(el => {
+    const target = parseInt(el.dataset.target);
+    let current = 0;
+    const step = Math.ceil(target / 30);
+    const interval = setInterval(() => {
+      current += step;
+      if (current >= target) { current = target; clearInterval(interval); }
+      el.textContent = current;
+    }, 30);
+  });
+}
+
+// ==================== MCQ ENGINE ====================
+let quizTimer = null;
+let quizTimeLeft = 30;
+
+function startMCQ(section) {
+  GAME.currentMCQ = section;
+  GAME.currentQuestionIdx = 0;
+  GAME.streak = 0;
+  const questions = MCQ_BANK[section];
+
+  // Set badge and title
+  const titles = {
+    PRE: { badge: 'Assessment 1 of 3 — Pre-Shock', title: 'Foundational Concepts', sub: 'Test your understanding of core economic principles.' },
+    MID: { badge: 'Assessment 2 of 3 — Mid-Simulation', title: 'Tradeoff Analysis', sub: 'Apply what you\'ve learned from your strategy decisions.' },
+    POST: { badge: 'Assessment 3 of 3 — Post-Crisis', title: 'Applied Economics', sub: 'Demonstrate mastery through real-world application.' }
+  };
+  const t = titles[section];
+  document.getElementById('mcq-phase-badge').textContent = t.badge;
+  document.getElementById('mcq-title').textContent = t.title;
+  document.getElementById('mcq-subtitle').textContent = t.sub;
+
+  GAME.mcqScores[section] = { correct: 0, total: questions.length, misses: {} };
+  showScreen('screen-mcq');
+  updateProgressForMCQ(section);
+  renderQuestion();
+}
+
+function updateProgressForMCQ(section) {
+  const map = { PRE: 35, MID: 72, POST: 85 };
+  document.getElementById('progress-fill').style.width = (map[section] || 35) + '%';
+}
+
+function renderQuestion() {
+  const section = GAME.currentMCQ;
+  const questions = MCQ_BANK[section];
+  const idx = GAME.currentQuestionIdx;
+
+  if (idx >= questions.length) {
+    finishMCQ(section);
+    return;
+  }
+
+  const q = questions[idx];
+  document.getElementById('quiz-progress').textContent = `Question ${idx + 1} of ${questions.length}`;
+  document.getElementById('quiz-score').textContent = `Score: ${GAME.mcqScores[section].correct}/${idx}`;
+
+  const streakEl = document.getElementById('quiz-streak');
+  if (GAME.streak >= 2) {
+    streakEl.textContent = `🔥 Streak: ${GAME.streak}`;
+    streakEl.classList.add('active');
+  } else {
+    streakEl.classList.remove('active');
+  }
+
+  document.getElementById('quiz-question').innerHTML = `
+    <div style="font-weight:400;">${q.q}</div>
+    <div class="quiz-concept">${q.concept}</div>
+  `;
+
+  const optionsEl = document.getElementById('quiz-options');
+  optionsEl.innerHTML = '';
+  const letters = ['A', 'B', 'C', 'D'];
+  q.options.forEach((opt, i) => {
+    const btn = document.createElement('div');
+    btn.className = 'quiz-option';
+    btn.innerHTML = `<span class="letter">${letters[i]}</span><span>${opt}</span>`;
+    btn.onclick = () => answerQuestion(i);
+    optionsEl.appendChild(btn);
+  });
+
+  document.getElementById('quiz-feedback').classList.remove('show');
+  document.getElementById('quiz-feedback').className = 'quiz-feedback';
+  document.getElementById('quiz-next-btn').classList.add('hidden');
+
+  // Timer
+  quizTimeLeft = 30;
+  document.getElementById('quiz-timer-fill').style.width = '100%';
+  clearInterval(quizTimer);
+  quizTimer = setInterval(() => {
+    quizTimeLeft -= 0.5;
+    const pct = (quizTimeLeft / 30) * 100;
+    document.getElementById('quiz-timer-fill').style.width = pct + '%';
+    if (quizTimeLeft <= 0) {
+      clearInterval(quizTimer);
+      answerQuestion(-1); // timeout
+    }
+  }, 500);
+}
+
+function answerQuestion(chosenIdx) {
+  clearInterval(quizTimer);
+  const section = GAME.currentMCQ;
+  const questions = MCQ_BANK[section];
+  const q = questions[GAME.currentQuestionIdx];
+  const correct = chosenIdx === q.answer;
+  const options = document.querySelectorAll('#quiz-options .quiz-option');
+
+  // Disable all options
+  options.forEach(o => o.classList.add('disabled'));
+
+  // Highlight correct and wrong
+  if (chosenIdx >= 0) options[chosenIdx].classList.add(correct ? 'correct' : 'wrong');
+  options[q.answer].classList.add('reveal-correct');
+  if (correct) options[q.answer].classList.add('correct');
+
+  // Update score
+  if (correct) {
+    GAME.mcqScores[section].correct++;
+    GAME.streak++;
+    GAME.maxStreak = Math.max(GAME.maxStreak, GAME.streak);
+    GAME.totalCorrect++;
+    SFX.play('correct');
+  } else {
+    GAME.streak = 0;
+    // Track concept misses
+    const concept = q.concept;
+    if (!GAME.mcqMisses[concept]) GAME.mcqMisses[concept] = 0;
+    GAME.mcqMisses[concept]++;
+    SFX.play('wrong');
+  }
+  GAME.totalQuestions++;
+
+  // Show feedback
+  const fb = document.getElementById('quiz-feedback');
+  fb.className = `quiz-feedback show ${correct ? 'correct-fb' : 'wrong-fb'}`;
+  fb.innerHTML = `
+    <strong>${correct ? '✓ Correct!' : (chosenIdx < 0 ? '⏰ Time\'s up!' : '✗ Not quite.')}</strong><br>
+    ${q.explanation}
+  `;
+
+  // Update streak display
+  const streakEl = document.getElementById('quiz-streak');
+  if (GAME.streak >= 2) {
+    streakEl.textContent = `🔥 Streak: ${GAME.streak}`;
+    streakEl.classList.add('active');
+  } else {
+    streakEl.classList.remove('active');
+  }
+
+  document.getElementById('quiz-next-btn').classList.remove('hidden');
+}
+
+function nextQuestion() {
+  GAME.currentQuestionIdx++;
+  renderQuestion();
+  SFX.play('click');
+}
+
+function finishMCQ(section) {
+  clearInterval(quizTimer);
+  const score = GAME.mcqScores[section];
+  score.percent = Math.round((score.correct / score.total) * 100);
+
+  if (section === 'PRE') {
+    // Go to shock event
+    triggerShock();
+  } else if (section === 'MID') {
+    // Go to post dashboard
+    startMCQ('POST');
+  } else if (section === 'POST') {
+    // Go to results
+    calculateResults();
+  }
+}
+
+// ==================== SHOCK EVENT ====================
+function triggerShock() {
+  // Random scenario
+  const keys = Object.keys(SHOCK_LIBRARY);
+  const key = keys[Math.floor(Math.random() * keys.length)];
+  GAME.shockScenario = key;
+  const shock = SHOCK_LIBRARY[key];
+
+  document.getElementById('shock-scenario-name').textContent = shock.name;
+  document.getElementById('shock-desc').textContent = shock.desc;
+
+  // Show impact on scores
+  const impactContainer = document.getElementById('dashboard-shock-impact');
+  impactContainer.innerHTML = '';
+  const metrics = [
+    { key: 'demand', label: 'Customer Demand', eKey: 'demand' },
+    { key: 'cost', label: 'Cost Efficiency', eKey: 'cost' },
+    { key: 'partner', label: 'Partner Stability', eKey: 'partner' },
+    { key: 'innovation', label: 'Innovation', eKey: 'innovation' }
+  ];
+  metrics.forEach(m => {
+    const effect = shock.effects[m.eKey];
+    const card = document.createElement('div');
+    card.className = 'meter-card';
+    card.innerHTML = `
+      <div class="meter-label">${m.label}</div>
+      <div class="meter-value" style="color:var(--red);font-size:2rem;">${effect >= 0 ? '+' : ''}${effect}</div>
+      <div class="text-sm text-muted mt-2">Impact on your system</div>
+    `;
+    impactContainer.appendChild(card);
+  });
+
+  // Build response options
+  const responseGrid = document.getElementById('response-grid');
+  responseGrid.innerHTML = '';
+  shock.responses.forEach((r, i) => {
+    const card = document.createElement('div');
+    card.className = 'response-card';
+    card.onclick = () => selectResponse(i);
+    card.innerHTML = `<h4>${r.label}</h4><p>${r.desc}</p>`;
+    responseGrid.appendChild(card);
+  });
+
+  showScreen('screen-shock');
+  SFX.play('alarm');
+  document.body.classList.add('screen-shake');
+  setTimeout(() => document.body.classList.remove('screen-shake'), 500);
+}
+
+function selectResponse(idx) {
+  GAME.selectedResponseIdx = idx;
+  document.querySelectorAll('.response-card').forEach((c, i) => {
+    c.classList.toggle('selected', i === idx);
+  });
+  document.getElementById('btn-lock-response').disabled = false;
+  SFX.play('click');
+}
+
+function lockResponse() {
+  if (GAME.selectedResponseIdx < 0) return;
+  SFX.play('lock');
+
+  const shock = SHOCK_LIBRARY[GAME.shockScenario];
+  const response = shock.responses[GAME.selectedResponseIdx];
+  GAME.shockResponse = response;
+
+  // Calculate post-shock scores
+  const SCEN_MULT = 0.65;
+  const RESP_MULT = 1.20;
+  GAME.postScores = {
+    demand: Math.round(Math.max(0, Math.min(100,
+      GAME.preScores.demand + (shock.effects.demand * SCEN_MULT) + (response.effects.demand * RESP_MULT)))),
+    cost: Math.round(Math.max(0, Math.min(100,
+      GAME.preScores.cost + (shock.effects.cost * SCEN_MULT) + (response.effects.cost * RESP_MULT)))),
+    partner: Math.round(Math.max(0, Math.min(100,
+      GAME.preScores.partner + (shock.effects.partner * SCEN_MULT) + (response.effects.partner * RESP_MULT)))),
+    innovation: Math.round(Math.max(0, Math.min(100,
+      GAME.preScores.innovation + (shock.effects.innovation * SCEN_MULT) + (response.effects.innovation * RESP_MULT))))
+  };
+  GAME.postScores.health = Math.round(
+    (GAME.postScores.demand + GAME.postScores.cost + GAME.postScores.partner + GAME.postScores.innovation) / 4
+  );
+
+  buildDashboard('dashboard-post', GAME.postScores, GAME.preScores);
+  showScreen('screen-dashboard-post');
+}
+
+function continueAfterPost() {
+  startMCQ('MID');
+}
+
+// ==================== RESULTS ====================
+function calculateResults() {
+  const pre = GAME.mcqScores.PRE?.percent || 0;
+  const mid = GAME.mcqScores.MID?.percent || 0;
+  const post = GAME.mcqScores.POST?.percent || 0;
+  const mcqOverall = Math.round(pre * 0.25 + mid * 0.30 + post * 0.45);
+  const avgScore = Math.round((mcqOverall + GAME.preScores.health + GAME.postScores.health) / 3);
+
+  let tier, pass = true, failReason = '';
+  if (avgScore >= 92) tier = 'GOLD';
+  else if (avgScore >= 78) tier = 'SILVER';
+  else if (avgScore >= 65) tier = 'BRONZE';
+  else { tier = 'REVIEW'; pass = false; failReason = 'Overall score below passing threshold.'; }
+  if (pass && GAME.postScores.health < 65) { pass = false; tier = 'REVIEW'; failReason = 'Post-shock system health fell below 65.'; }
+
+  // Generate claim code
+  const pools = {
+    GOLD: ['BOW-M3-GOLD','BOW-M3-ELITE','BOW-M3-PRIME'],
+    SILVER: ['BOW-M3-SILVER','BOW-M3-CORE','BOW-M3-ADV'],
+    BRONZE: ['BOW-M3-BRONZE','BOW-M3-FOUND','BOW-M3-BASIC']
+  };
+  let claimCode = '';
+  if (pass && pools[tier]) {
+    const pool = pools[tier];
+    const chars = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
+    let suffix = '';
+    for (let i = 0; i < 5; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    claimCode = pool[Math.floor(Math.random() * pool.length)] + '-' + suffix;
+  }
+
+  // Build results UI
+  const tierDisplay = document.getElementById('tier-reveal');
+  const tierColors = { GOLD: 'tier-gold', SILVER: 'tier-silver', BRONZE: 'tier-bronze', REVIEW: 'tier-fail' };
+  const tierEmoji = { GOLD: '🏆', SILVER: '🥈', BRONZE: '🥉', REVIEW: '📋' };
+  tierDisplay.className = `tier-reveal ${tierColors[tier]}`;
+  tierDisplay.textContent = `${tierEmoji[tier]} ${tier}`;
+
+  if (pass) {
+    document.getElementById('results-heading').textContent = `Congratulations, ${GAME.playerName}!`;
+    document.getElementById('claim-code-area').classList.remove('hidden');
+    document.getElementById('claim-code-display').textContent = claimCode;
+  } else {
+    document.getElementById('results-heading').textContent = `Review Required, ${GAME.playerName}`;
+    document.getElementById('claim-code-area').classList.add('hidden');
+  }
+
+  // Score breakdown
+  const breakdown = document.getElementById('score-breakdown');
+  breakdown.innerHTML = `
+    <div class="score-item"><div class="label">MCQ Pre (25%)</div><div class="value">${pre}%</div></div>
+    <div class="score-item"><div class="label">MCQ Mid (30%)</div><div class="value">${mid}%</div></div>
+    <div class="score-item"><div class="label">MCQ Post (45%)</div><div class="value">${post}%</div></div>
+    <div class="score-item"><div class="label">MCQ Overall</div><div class="value">${mcqOverall}%</div></div>
+    <div class="score-item"><div class="label">Pre-Shock Health</div><div class="value">${GAME.preScores.health}</div></div>
+    <div class="score-item"><div class="label">Post-Shock Health</div><div class="value">${GAME.postScores.health}</div></div>
+    <div class="score-item"><div class="label">Final Average</div><div class="value" style="color:${pass ? 'var(--green)' : 'var(--red)'};">${avgScore}</div></div>
+    <div class="score-item"><div class="label">Best Streak</div><div class="value" style="color:var(--gold);">${GAME.maxStreak}🔥</div></div>
+  `;
+
+  // Concept mastery
+  const concepts = ['Expected Value','Opportunity Cost','Signal vs. Noise','Comparative Advantage',
+    'Market Inefficiency','Asymmetric Information','Efficiency'];
+  const rows = document.getElementById('concept-rows');
+  rows.innerHTML = '';
+  concepts.forEach(c => {
+    const misses = GAME.mcqMisses[c] || 0;
+    const status = misses >= 2 ? 'review' : 'strong';
+    const statusText = misses >= 2 ? '⚠ Review' : '✓ Strong';
+    const row = document.createElement('div');
+    row.className = 'concept-row';
+    row.innerHTML = `<span>${c}</span><span class="concept-status ${status}">${statusText}</span>`;
+    rows.appendChild(row);
+  });
+
+  showScreen('screen-results');
+  document.getElementById('progress-fill').style.width = '100%';
+
+  // Celebration effects
+  if (pass) {
+    SFX.play('fanfare');
+    const confettiColors = {
+      GOLD: ['#f59e0b','#fbbf24','#d97706'],
+      SILVER: ['#94a3b8','#cbd5e1','#64748b'],
+      BRONZE: ['#d97706','#ea580c','#f97316']
+    };
+    setTimeout(() => Confetti.launch(...(confettiColors[tier] || confettiColors.BRONZE)), 600);
+  } else {
+    SFX.play('wrong');
+  }
+
+  // Save to localStorage
+  try {
+    const result = { name: GAME.playerName, tier, avgScore, mcqOverall, pre, mid, post,
+      preHealth: GAME.preScores.health, postHealth: GAME.postScores.health,
+      claimCode, date: new Date().toISOString(), focuses: GAME.selectedFocuses.map(i => FOCUSES[i].name),
+      shock: GAME.shockScenario };
+    const history = JSON.parse(localStorage.getItem('delivery-empire-history') || '[]');
+    history.push(result);
+    localStorage.setItem('delivery-empire-history', JSON.stringify(history));
+  } catch (e) {}
+}
+
+function restartGame() {
+  Object.assign(GAME, {
+    selectedFocuses: [], allocation: 50,
+    preScores: { demand:0, cost:0, partner:0, innovation:0, health:0 },
+    postScores: { demand:0, cost:0, partner:0, innovation:0, health:0 },
+    shockScenario: null, shockResponse: null, selectedResponseIdx: -1,
+    mcqScores: { PRE:null, MID:null, POST:null }, mcqMisses: {},
+    currentMCQ: null, currentQuestionIdx: 0, streak: 0, maxStreak: 0,
+    totalCorrect: 0, totalQuestions: 0
+  });
+  showScreen('screen-setup');
+}
+
+// ==================== INIT ====================
+window.addEventListener('DOMContentLoaded', () => {
+  BG.init();
+});
+</script>
+</body>
+</html>
